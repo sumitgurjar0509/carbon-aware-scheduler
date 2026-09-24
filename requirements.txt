@@ -1,0 +1,23 @@
+pandas>=2.0
+# Pinned <2.0: paired with the lightgbm==4.3.0 pin below. lightgbm
+# 4.3.0's numpy interop code predates numpy 2.0's stricter `copy=False`
+# semantics and raises ValueError under numpy>=2.0; numpy 2.4.6 paired
+# with lightgbm's newer 4.7.0 build instead crashes outright (access
+# violation) on this machine. This pairing is the one that actually
+# works here -- verified pandas/matplotlib/sklearn all still function
+# correctly under numpy 1.26.4.
+numpy==1.26.4
+# Pinned: lightgbm 4.7.0 crashes (OSError: access violation reading
+# 0x0...0 inside LGBM_DatasetSetField) on this machine when building a
+# Dataset, reproduced even with a bare numpy array and no pandas
+# involved at all -- an ABI-level incompatibility with this numpy
+# build, not a bug in our code. 4.3.0 works cleanly.
+lightgbm==4.3.0
+# Pinned: scikit-learn>=1.5's compiled sparsefuncs_fast extension is
+# blocked by this machine's Windows Application Control policy
+# ("An Application Control policy has blocked this file"); 1.4.2's
+# build is unaffected and has everything this project uses.
+scikit-learn==1.4.2
+matplotlib>=3.7
+requests>=2.31
+pytest>=7.4
