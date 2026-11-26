@@ -181,12 +181,16 @@ def run_hourly_experiment(df30: pd.DataFrame, horizons=HOURLY_HORIZONS,
 # ----------------------------------------------------------------------
 def forecast_tables(hourly: pd.DataFrame, origins: pd.DatetimeIndex,
                     models_dir: Path = HOURLY_MODELS_DIR, tag: str | None = None,
-                    models_by_h: dict | None = None) -> dict:
+                    models_by_h: dict | None = None,
+                    corrections_path: Path | None = None) -> dict:
     """
     Returns {"q10","q50","q90"} -> DataFrame indexed by origin hour, with
     columns 0..23 (horizon h = the hour starting at origin + h).
     q10/q90 are CQR-calibrated; q50 is the raw median (CQR never changes it).
     Saved models are used only if their label matches the dataset tag.
+    corrections_path: CQR corrections to apply instead of the ones saved
+    with the models (M3 uses corrections re-fitted on C1 only). Its folder
+    must carry a matching dataset label too.
     """
     import lightgbm as lgb
 
@@ -198,7 +202,11 @@ def forecast_tables(hourly: pd.DataFrame, origins: pd.DatetimeIndex,
 
     if models_by_h is None:
         check_model_label(models_dir, tag or get_data_tag())
-        corrections = pd.read_csv(models_dir / "cqr_corrections.csv").set_index("horizon_h")
+        if corrections_path is None:
+            corrections_path = models_dir / "cqr_corrections.csv"
+        else:
+            check_model_label(Path(corrections_path).parent, tag or get_data_tag())
+        corrections = pd.read_csv(corrections_path).set_index("horizon_h")
     out = {q: pd.DataFrame(index=origins, columns=HOURLY_HORIZONS, dtype=float)
            for q in ("q10", "q50", "q90")}
     for h in HOURLY_HORIZONS:

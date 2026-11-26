@@ -1,0 +1,7 @@
+{
+  "note": "RU MIP check vs per-option form on C2 (first 200 solves per run, beta > 0). 5 of 2000 checks differed: cvar_b0.5 (2), cvar_b0.5_replan (1), cvar_b0.75_replan (2). The two cvar_b0.5 cases were re-run with values recorded (below); in both, CBC's RU MIP returned a slightly WORSE option (objective higher by ~4e-6) than the per-option optimum, consistent with CBC stopping within its default MIP tolerance. The decisions used in all runs come from the per-option form.",
+  "cases_cvar_b0.5": [
+    {"job_id": 49, "hour": "2026-06-07 20:00:00+00:00", "per_option_choice": [1, 2], "per_option_value": 0.8362312566283543, "ru_choice": [0, 2], "ru_reported_value": 0.8362352268719535, "true_f_of_ru_choice": 0.8362352260451781},
+    {"job_id": 130, "hour": "2026-06-10 03:00:00+00:00", "per_option_choice": [5, 1], "per_option_value": 1.0463140786509013, "ru_choice": [4, 1], "ru_reported_value": 1.046317841620988, "true_f_of_ru_choice": 1.0463178289162534}
+  ]
+}
