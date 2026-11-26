@@ -560,11 +560,17 @@ shift of the whole distribution. Full table in
 Full per-job records: `results/tables/simulation_results.csv`. Plot:
 `results/plots/carbon_saved_by_bucket.png`.
 
-## Risk-tolerance sweep (the real contribution)
+## Risk-tolerance sweep (exploratory)
 
 ```bash
 python src/risk_sweep.py
 ```
+
+**This sweep is exploratory.** It was run on the test period to show the
+trade-off between carbon saved and regret. It does not select or
+recommend a `risk_weight`. Any value used in a later comparison must be
+chosen on the calibration period only, and then run once on the test
+period.
 
 Step 5's `uncertainty_aware` was a single fixed policy: compare the
 CQR-calibrated **q90** (full worst case) against the current actual, and
@@ -606,7 +612,7 @@ combinations) that its average is dominated by whichever one or two
 jobs happened to regret. Full table (with the 6h/12h/24h breakdown):
 `results/tables/risk_sweep_results.csv`.
 
-### Honest read: is there a genuine sweet spot?
+### Reading the trade-off
 
 **No single risk_weight Pareto-dominates both endpoints.** Both %
 carbon saved and regret rate decrease monotonically as risk_weight
@@ -618,35 +624,26 @@ What the frontier does show is **uneven marginal value** along its
 length — the exchange rate between savings given up and regret avoided
 is far from constant:
 
-- **0.0 → 0.2** (the cheapest step): gives up 4.5 points of savings to
-  avoid 2.5 points of regret — roughly 1.8 points of savings per point
-  of regret avoided.
-- **0.2 → 0.6** (the expensive middle): gives up 12.4 points of savings
-  to avoid only 2.0 points of regret — roughly 6.2 points of savings
-  per point of regret avoided, more than 3× worse value than the first
-  step.
-- **0.6 → 1.0** (cheap again): gives up 4.6 points of savings to avoid
-  4.5 points of regret — close to 1:1.
+- **0.0 → 0.2**: gives up 4.5 points of savings to avoid 2.5 points of
+  regret — roughly 1.8 points of savings per point of regret avoided.
+- **0.2 → 0.6**: gives up 12.4 points of savings to avoid 2.0 points of
+  regret — roughly 6.2 points of savings per point of regret avoided,
+  more than 3× the ratio of the first segment.
+- **0.6 → 1.0**: gives up 4.6 points of savings to avoid 4.5 points of
+  regret — close to 1:1.
 
-So the practical recommendation isn't "pick risk_weight=0.5" — it's
-that **risk_weight ≈ 0.2 is the best cheap first step away from
-forecast_greedy's regret**, and if more regret-aversion is wanted, it is
-far more efficient to move most of the way toward 1.0 than to linger in
-the 0.2–0.6 range, which buys comparatively little regret reduction for
-the savings it gives up. This is a genuinely useful, nuanced result —
-not "intermediate values are always better," but "the frontier has a
-cheap region near each end and an expensive region in the middle,"
-which is itself a finding worth a paragraph in the discussion chapter.
+These ratios describe the shape of the curve on this one test period (201
+jobs). They have not been tested for statistical significance or checked
+on other periods, so they are not a basis for choosing a value.
 
 **Caveat on the per-bucket breakdown**: the 24h bucket (61 jobs, and as
 few as 2-5 jobs regretting at some risk_weight values) shows a
 non-monotonic, visibly noisy frontier (`results/plots/
 risk_frontier_by_bucket.png`) — small-sample noise, not a real reversal
 of the trend. The 12h bucket (73 jobs) shows the cleanest, most
-textbook-monotonic frontier of the three. Report the overall (pooled)
-frontier as the headline result; treat the per-bucket frontiers as
-suggestive, not independently conclusive, given the sample sizes
-involved.
+textbook-monotonic frontier of the three. The overall (pooled) frontier
+rests on the most jobs; treat the per-bucket frontiers as suggestive,
+not independently conclusive, given the sample sizes involved.
 
 ## Tests
 
