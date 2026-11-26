@@ -88,11 +88,11 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import calibration  # noqa: E402
+from data_config import check_model_label, existing_workload_path, get_data_tag  # noqa: E402
 from forecasting import HORIZON_HOURS, create_features, get_feature_columns, load_clean_data  # noqa: E402
 from schedulers import SCHEDULERS  # noqa: E402
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 TABLES_DIR = PROJECT_ROOT / "results" / "tables"
 
 NATIVE_PERIOD = pd.Timedelta(minutes=30)
@@ -149,6 +149,13 @@ def filter_jobs_to_test_period(workload_df: pd.DataFrame, test_start: pd.Timesta
     return filtered
 
 
+def load_workload(tag: str | None = None) -> pd.DataFrame:
+    """Reads the workload trace that belongs to dataset `tag` (default: CAS_DATA_TAG)."""
+    path = existing_workload_path(tag)
+    print(f"Loaded {path.name}")
+    return pd.read_csv(path, parse_dates=["arrival_time", "deadline"])
+
+
 # ----------------------------------------------------------------------
 # Forecast lookup tables (precomputed once, vectorized, reused by every job)
 # ----------------------------------------------------------------------
@@ -164,6 +171,9 @@ def build_forecast_tables(df_feat: pd.DataFrame, test_start: pd.Timestamp,
     thousands of one-row predict() calls with the model reloaded from
     disk each time.
     """
+    # Refuse models trained on another dataset, or not yet calibrated.
+    check_model_label(calibration.MODELS_DIR, get_data_tag())
+
     feature_cols = get_feature_columns(df_feat)
     mask = (df_feat["timestamp"] >= test_start) & (df_feat["timestamp"] <= test_end)
     test_feat = df_feat.loc[mask].reset_index(drop=True)
@@ -329,8 +339,7 @@ def run_simulation():
     print(f"Test period: {test_start} -> {test_end} ({len(test_feat)} settlement periods)")
     print(f"Threshold scheduler value (train-split median): {threshold_value:.1f} gCO2/kWh")
 
-    workload_path = PROCESSED_DIR / "workload_trace.csv"
-    workload_df = pd.read_csv(workload_path, parse_dates=["arrival_time", "deadline"])
+    workload_df = load_workload()
     jobs = filter_jobs_to_test_period(workload_df, test_start, test_end)
 
     print("\nBuilding CQR-calibrated forecast lookup tables (1h-24h horizons)...")

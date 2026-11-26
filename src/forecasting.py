@@ -110,6 +110,12 @@ import pandas as pd
 from sklearn.metrics import mean_absolute_error
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from data_config import (  # noqa: E402
+    clean_data_path,
+    clear_model_label,
+    get_data_tag,
+    write_model_label,
+)
 from data_pipeline import PROCESSED_DIR  # noqa: E402
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -238,14 +244,12 @@ def evaluate_forecast(test_df, preds_df, target_col='carbon_intensity'):
 # ----------------------------------------------------------------------
 # NEW: loading real data + multi-horizon target/baseline construction
 # ----------------------------------------------------------------------
-def load_clean_data() -> pd.DataFrame:
-    """Loads the most recently built cleaned dataset from data_pipeline.py."""
-    files = list(PROCESSED_DIR.glob("clean_*.csv"))
-    if not files:
-        raise SystemExit("No processed dataset found. Run src/data_pipeline.py first.")
-    latest = max(files, key=lambda p: p.stat().st_mtime)
-    df = pd.read_csv(latest, parse_dates=["timestamp"])
-    print(f"Loaded {latest.name}: {len(df)} rows "
+def load_clean_data(tag: str | None = None,
+                    processed_dir: Path = PROCESSED_DIR) -> pd.DataFrame:
+    """Loads the cleaned dataset named by `tag` (default: CAS_DATA_TAG)."""
+    path = clean_data_path(tag, processed_dir)
+    df = pd.read_csv(path, parse_dates=["timestamp"])
+    print(f"Loaded {path.name}: {len(df)} rows "
           f"({df['timestamp'].min()} -> {df['timestamp'].max()})")
     return df
 
@@ -336,6 +340,7 @@ def run_multi_horizon_experiment(df: pd.DataFrame, horizons_hours=HORIZON_HOURS,
 
     if save_models:
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
+        clear_model_label(MODELS_DIR)
 
     rows = []
     trained_models = {}
@@ -496,6 +501,7 @@ if __name__ == "__main__":
           f"({len(HORIZON_HOURS)} horizons x {len(QUANTILES)} quantiles = "
           f"{len(HORIZON_HOURS) * len(QUANTILES)} models)...")
     per_horizon_df, trained_models, test_sets = run_multi_horizon_experiment(df)
+    write_model_label(MODELS_DIR, get_data_tag(), stage="forecasting")
 
     TABLES_DIR.mkdir(parents=True, exist_ok=True)
     per_horizon_path = TABLES_DIR / "forecast_by_horizon.csv"

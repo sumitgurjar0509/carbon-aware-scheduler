@@ -32,6 +32,7 @@ data/
   raw/          cached raw API responses, one CSV per 14-day chunk
   processed/    cleaned 30-min series + gap reports
 src/
+  data_config.py        data window, dataset tag and model label rules
   data_pipeline.py      fetch / cache / clean carbon intensity data
   eda.py                exploratory plots (overview + diurnal + monthly)
   forecasting.py        multi-horizon baselines + LightGBM quantile forecasting
@@ -42,8 +43,10 @@ src/
   evaluate.py           metrics computation + results table/plot
   risk_sweep.py         risk_weight frontier for uncertainty_aware (see below)
 notebooks/          exploratory analysis
+scripts/
+  compare_tables.py     compare regenerated tables with the reference copy
 results/
-  plots/, tables/, models/
+  plots/, tables/, tables_committed/, models/
 tests/              sanity tests per module
 ```
 
@@ -70,6 +73,67 @@ this machine's Windows Application Control policy. If you're on a
 different machine and hit none of these, the pins can likely be
 loosened — but verify with `pytest tests/ -v` and a full pipeline run
 before trusting a relaxed version.
+
+## Reproducing the results (data window and dataset tag)
+
+Every script that reads processed data needs to be told **which dataset**
+to use, through the `CAS_DATA_TAG` environment variable. A tag is the
+date part of a file name: `data/processed/clean_<tag>.csv`. If the
+variable is not set, the script stops and lists the available tags. It
+never picks "the newest file".
+
+The committed results use tag `20250923_20260923` (2025-09-23 03:30 to
+2026-09-23 03:30 UTC, 17,521 periods, 0 missing). In PowerShell:
+
+```powershell
+$env:CAS_DATA_TAG = "20250923_20260923"
+python src/eda.py
+python src/forecasting.py
+python src/calibration.py          # must run before any simulation
+python src/workload_generator.py   # writes workload_trace_<tag>.csv (seed 42)
+python src/evaluate.py
+python src/risk_sweep.py
+python src/cvar_sweep.py
+python scripts/compare_tables.py
+```
+
+These commands **overwrite** `results/tables/`, `results/plots/` and
+`results/models/`. They do not use the network.
+
+- `scripts/compare_tables.py` compares every CSV in `results/tables/`
+  with the reference copy in `results/tables_committed/` (relative
+  tolerance 1e-6, absolute 1e-8). The `cvar_*` tables are reported as
+  `NO_BASELINE` because no earlier committed version exists.
+- Training writes `results/models/quantile/data_tag.json`. The simulator
+  refuses models trained on another tag, or not yet calibrated.
+
+### Fetching a different window
+
+`data_pipeline.py` fetches the last 365 days by default. To fix the
+window, set one or both of these (ISO 8601, UTC if no timezone given):
+
+```powershell
+$env:CAS_START = "2025-09-23T03:00Z"
+$env:CAS_END   = "2026-09-23T03:00Z"
+python src/data_pipeline.py
+```
+
+With only `CAS_END`, the start is 365 days earlier. With only
+`CAS_START`, the end is the current hour. Remove a variable with
+`Remove-Item Env:CAS_END`.
+
+**Limitation:** cache file names and tags contain dates only. Two windows
+that differ only in the hour share the same cached files, so the second
+run silently reuses the first one's data.
+
+### Software versions
+
+`results/environment_m1.txt` holds the exact package versions used for
+the M1 reproduction (Python 3.11.9, Windows 11). It was created with:
+
+```bash
+pip freeze > results/environment_m1.txt
+```
 
 ## Data pipeline
 
@@ -341,7 +405,7 @@ python src/workload_generator.py
 ```
 
 Generates a synthetic trace of delay-tolerant batch jobs
-(`data/processed/workload_trace.csv`): Poisson-process arrivals,
+(`data/processed/workload_trace_<tag>.csv`): Poisson-process arrivals,
 lognormal durations (median 45 min, capped at 4h), and job counts
 stratified evenly across the three deadline-slack buckets. Full
 modeling rationale is in the module docstring of

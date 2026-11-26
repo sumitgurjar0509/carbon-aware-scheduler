@@ -36,10 +36,10 @@ from evaluate import BASELINE, compute_metrics_table  # noqa: E402
 from forecasting import create_features, load_clean_data  # noqa: E402
 from schedulers import SCHEDULERS, make_uncertainty_aware  # noqa: E402
 from simulator import (  # noqa: E402
-    PROCESSED_DIR,
     SimContext,
     build_forecast_tables,
     filter_jobs_to_test_period,
+    load_workload,
     simulate_job,
 )
 
@@ -65,8 +65,7 @@ def run_sweep():
     test_start, test_end = test_feat["timestamp"].min(), test_feat["timestamp"].max()
     threshold_value = train_feat["carbon_intensity"].median()
 
-    workload_df = pd.read_csv(PROCESSED_DIR / "workload_trace.csv",
-                               parse_dates=["arrival_time", "deadline"])
+    workload_df = load_workload()
     jobs = filter_jobs_to_test_period(workload_df, test_start, test_end)
 
     print("\nBuilding CQR-calibrated forecast lookup tables (1h-24h horizons)...")

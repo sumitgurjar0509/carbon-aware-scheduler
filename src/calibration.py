@@ -109,6 +109,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from data_config import clear_model_label, get_data_tag, write_model_label  # noqa: E402
 from forecasting import (  # noqa: E402
     HORIZON_HOURS,
     MODELS_DIR,
@@ -218,6 +219,7 @@ def run_calibration_experiment(df: pd.DataFrame, horizons_hours=HORIZON_HOURS,
 
     if save_models:
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
+        clear_model_label(MODELS_DIR)
 
     rows = []
     trained_models = {}
@@ -377,6 +379,7 @@ if __name__ == "__main__":
           f"(train {1-TEST_FRAC-CALIB_FRAC:.0%} / calib {CALIB_FRAC:.0%} / "
           f"test {TEST_FRAC:.0%}, chronological)...")
     per_horizon_df, trained_models, corrections = run_calibration_experiment(df)
+    write_model_label(MODELS_DIR, get_data_tag(), stage="calibration")
 
     TABLES_DIR.mkdir(parents=True, exist_ok=True)
     per_horizon_path = TABLES_DIR / "calibration_by_horizon.csv"

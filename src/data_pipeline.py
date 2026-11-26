@@ -39,13 +39,17 @@ data/raw/. Re-running the pipeline with the same date range reads from
 disk. Delete files under data/raw/ to force a re-download.
 """
 
+import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import requests
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from data_config import TAG_ENV, get_window  # noqa: E402
 
 API_BASE = "https://api.carbonintensity.org.uk"
 CHUNK_DAYS = 14  # API hard limit per request
@@ -284,7 +288,8 @@ def load_or_build_dataset(
 
 
 if __name__ == "__main__":
-    # Window = 365 days up to now, UTC.
+    # Default window = 365 days up to now, UTC. Override it with the
+    # CAS_START / CAS_END environment variables (see data_config.py).
     #
     # The API's history actually goes back to at least 2018 (checked
     # live: /intensity/2018-01-01T00:00Z/... returns real data), so we
@@ -304,11 +309,12 @@ if __name__ == "__main__":
     # This is a judgment call, not a hard constraint -- worth defending
     # at the viva as "one full seasonal cycle of *current-regime* grid
     # behaviour" rather than "maximum available history".
-    end = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-    start = end - timedelta(days=365)
+    start, end = get_window()
 
     print(f"Building dataset for {start} -> {end} ...")
     clean_df, gap_report = load_or_build_dataset(start, end)
+    print(f"Dataset tag (set {TAG_ENV} to this): "
+          f"{start.strftime('%Y%m%d')}_{end.strftime('%Y%m%d')}")
 
     print("\n=== Gap report ===")
     for k, v in gap_report.items():

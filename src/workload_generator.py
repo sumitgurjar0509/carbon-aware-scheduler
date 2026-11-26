@@ -69,10 +69,14 @@ none of it is fabricated data (it's synthetic BY DESIGN, since we don't
 have a real cluster trace, and the point is to test scheduling logic
 under a controlled, explainable workload).
 """
+import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from data_config import gap_report_path, get_data_tag, workload_path  # noqa: E402
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
@@ -85,13 +89,9 @@ N_JOBS = 1000
 RANDOM_SEED = 42
 
 
-def _load_data_range():
-    """Reads the actual fetched carbon-data date range from the latest gap report."""
-    reports = list(PROCESSED_DIR.glob("gap_report_*.csv"))
-    if not reports:
-        raise SystemExit("No gap report found -- run src/data_pipeline.py first.")
-    latest = max(reports, key=lambda p: p.stat().st_mtime)
-    report = pd.read_csv(latest).iloc[0]
+def _load_data_range(tag: str, processed_dir: Path = PROCESSED_DIR):
+    """Reads the carbon-data date range from the gap report of dataset `tag`."""
+    report = pd.read_csv(gap_report_path(tag, processed_dir)).iloc[0]
     return pd.Timestamp(report["range_start"]), pd.Timestamp(report["range_end"])
 
 
@@ -179,12 +179,13 @@ def summarize_workload(df: pd.DataFrame):
 
 
 if __name__ == "__main__":
-    data_start, data_end = _load_data_range()
+    tag = get_data_tag()
+    data_start, data_end = _load_data_range(tag)
     print(f"Carbon data range: {data_start} -> {data_end}")
 
     workload = generate_workload(data_start, data_end)
 
-    out_path = PROCESSED_DIR / "workload_trace.csv"
+    out_path = workload_path(tag)
     workload.to_csv(out_path, index=False)
     print(f"\nSaved {len(workload)} jobs to {out_path}")
 

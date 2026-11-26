@@ -38,10 +38,10 @@ from forecasting import create_features, load_clean_data  # noqa: E402
 from risk_sweep import RISK_WEIGHTS, simulate_with_fn  # noqa: E402
 from schedulers import SCHEDULERS, make_cvar_aware, make_uncertainty_aware  # noqa: E402
 from simulator import (  # noqa: E402
-    PROCESSED_DIR,
     SimContext,
     build_forecast_tables,
     filter_jobs_to_test_period,
+    load_workload,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -59,8 +59,7 @@ def run_cvar_sweep():
     test_start, test_end = test_feat["timestamp"].min(), test_feat["timestamp"].max()
     threshold_value = train_feat["carbon_intensity"].median()
 
-    workload_df = pd.read_csv(PROCESSED_DIR / "workload_trace.csv",
-                               parse_dates=["arrival_time", "deadline"])
+    workload_df = load_workload()
     jobs = filter_jobs_to_test_period(workload_df, test_start, test_end)
 
     print("\nBuilding CQR-calibrated forecast lookup tables (1h-24h horizons)...")

@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from data_pipeline import PROCESSED_DIR, RAW_DIR  # noqa: E402
+from data_config import clean_data_path  # noqa: E402
 
 RESULTS_DIR = Path(__file__).resolve().parent.parent / "results" / "plots"
 
@@ -89,18 +89,9 @@ def plot_overview(df: pd.DataFrame, out_path: Path):
 
 
 if __name__ == "__main__":
-    processed_files = list(PROCESSED_DIR.glob("clean_*.csv"))
-    if not processed_files:
-        raise SystemExit("No processed dataset found. Run src/data_pipeline.py first.")
-
-    # Sort by modification time, not filename -- filenames encode the
-    # window's start date (clean_YYYYMMDD_YYYYMMDD.csv), so a widened
-    # window (e.g. 365 days, starting further back) sorts BEFORE a
-    # narrower one alphabetically even though it was built more
-    # recently. mtime reflects which run actually produced it last.
-    latest_file = max(processed_files, key=lambda p: p.stat().st_mtime)
-    df = pd.read_csv(latest_file, parse_dates=["timestamp"])
-    print(f"Loaded {latest_file.name}: {len(df)} rows")
+    data_file = clean_data_path()  # the dataset named by CAS_DATA_TAG
+    df = pd.read_csv(data_file, parse_dates=["timestamp"])
+    print(f"Loaded {data_file.name}: {len(df)} rows")
 
     plot_overview(df, RESULTS_DIR / "carbon_intensity_overview.png")
 
