@@ -1,0 +1,51 @@
+{
+  "chosen": null,
+  "decided_by": "C1 diagnostics A1-A3 only (spec \u00a71a)",
+  "code_commit_at_run": "7fcce82c47563151dbd7808ccdadb8ca050d646c",
+  "data_tag": "20250923_20260923",
+  "c1_origins": [
+    "2026-04-30 13:00:00+00:00",
+    "2026-06-05 00:00:00+00:00"
+  ],
+  "n_c1_origins": 852,
+  "diagnostics": [
+    {
+      "model": "v1",
+      "levels": "q10 q50 q90",
+      "copula": "AR(1) rho=0.8185",
+      "A1_outside_support": 0.11375195618153365,
+      "A1_pass": false,
+      "A2_cov_6h_pooled": 0.7573356807511737,
+      "A2_pass": true,
+      "cov_6h_h0_5": 0.7676056338028169,
+      "cov_6h_h6_11": 0.7488262910798122,
+      "cov_6h_h12_17": 0.7629107981220657,
+      "cov_6h_h18_23": 0.75,
+      "A3_min_bin": 0.036727308294209705,
+      "A3_max_bin": 0.15439162754303598,
+      "A3_pass": false,
+      "n_origins": 852,
+      "n_values": 20448,
+      "all_pass": false
+    },
+    {
+      "model": "i",
+      "levels": "q02 q05 q10 q50 q90 q95 q98",
+      "copula": "AR(1) rho=0.9320",
+      "A1_outside_support": 0.020539906103286387,
+      "A1_pass": false,
+      "A2_cov_6h_pooled": 0.8259976525821596,
+      "A2_pass": true,
+      "cov_6h_h0_5": 0.8356807511737089,
+      "cov_6h_h6_11": 0.82981220657277,
+      "cov_6h_h12_17": 0.8204225352112676,
+      "cov_6h_h18_23": 0.818075117370892,
+      "A3_min_bin": 0.03589593114241001,
+      "A3_max_bin": 0.15400039123630674,
+      "A3_pass": false,
+      "n_origins": 852,
+      "n_values": 20448,
+      "all_pass": false
+    }
+  ]
+}
