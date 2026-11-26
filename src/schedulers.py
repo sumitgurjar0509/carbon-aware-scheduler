@@ -29,6 +29,7 @@ times per job (see simulator.py's decision-grid construction) -- so any
 difference in outcomes between them reflects the SCHEDULING POLICY, not a
 difference in what candidates were available to choose from.
 """
+import numpy as np
 import pandas as pd
 
 
@@ -193,6 +194,139 @@ def make_uncertainty_aware(risk_weight: float):
 # Step 5's original fixed policy, kept as an alias so its results stay
 # exactly reproducible -- see make_uncertainty_aware's docstring.
 uncertainty_aware = make_uncertainty_aware(1.0)
+
+
+# ----------------------------------------------------------------------
+# Step 7: CVaR-based scheduler
+# ----------------------------------------------------------------------
+_QUANTILE_LEVELS = (0.1, 0.5, 0.9)
+
+
+def quantile_function_knots(q10: float, q50: float, q90: float):
+    """
+    Approximates a candidate's carbon-intensity distribution from its
+    three CQR-calibrated quantiles as a PIECEWISE-LINEAR QUANTILE
+    FUNCTION Q(p) (equivalently, a piecewise-uniform density), returned
+    as knots (p, Q(p)) spanning p in [0, 1]:
+
+        (0.1, q10) -- (0.5, q50) -- (0.9, q90)   interpolated linearly
+        tails [0, 0.1] and [0.9, 1] extended linearly with the slope of
+        the adjacent inner segment, i.e.
+            Q(0) = q10 - (q50 - q10) / 4
+            Q(1) = q90 + (q90 - q50) / 4
+
+    The three quantiles are first sorted (monotone rearrangement), so a
+    crossed forecast (e.g. q10 > q50) still yields a valid,
+    non-decreasing Q(p).
+
+    LIMITATIONS -- read before interpreting any CVaR number:
+      - Three quantiles say nothing about the tail SHAPE beyond q90.
+        Linear extrapolation gives a BOUNDED upper tail (max =
+        q90 + (q90 - q50)/4): real grid carbon intensity can have
+        heavier tails (sudden low-wind spells), which this cannot
+        represent. A heavier-tailed choice (e.g. exponential beyond
+        q90) would make CVaR strictly larger than the values used here.
+      - Inside [0.1, 0.9] the density is assumed uniform between
+        adjacent knots, which is the least-informative choice given
+        only three points, not an estimate of the true shape.
+      - CQR calibrates only the 80% INTERVAL [q10, q90] to marginal
+        coverage; it does not calibrate the q50 or any other level, and
+        the coverage is marginal across all origins, not per-candidate.
+      - It is a distribution of POINT intensity at the candidate's
+        start, not of the job's integrated cost over its duration --
+        the same simplification forecast_greedy and uncertainty_aware
+        already make (see oracle()'s design note).
+    """
+    lo, mid, hi = sorted((q10, q50, q90))
+    p = np.array([0.0, 0.1, 0.5, 0.9, 1.0])
+    q = np.array([lo - (mid - lo) / 4.0, lo, mid, hi, hi + (hi - mid) / 4.0])
+    return p, q
+
+
+def cvar(forecast: dict, alpha: float) -> float:
+    """
+    CVaR_alpha of a candidate's (approximate) carbon-intensity
+    distribution: the expected intensity in the WORST alpha-fraction of
+    outcomes, where "worst" means HIGHEST intensity (upper tail):
+
+        CVaR_alpha = (1/alpha) * integral_{1-alpha}^{1} Q(p) dp
+
+    with Q from `quantile_function_knots`. Computed exactly (Q is
+    piecewise linear, so the trapezoid rule over its knots plus the
+    1-alpha cut point is exact, not a numerical approximation).
+
+    Consequence worth stating up front: for any alpha <= 0.5 the whole
+    upper tail [1-alpha, 1] lies on the single linear piece through
+    (0.5, q50) and (0.9, q90), so
+
+        CVaR_alpha = Q(1 - alpha/2) = q50 + (1.25 - 1.25 * alpha) * (q90 - q50)
+
+    and in particular CVaR_0.2 = q90 EXACTLY, and q10 plays no role.
+    Under this three-quantile approximation, CVaR at the calibration
+    alpha adds no tail information beyond q90 itself.
+    """
+    if not 0.0 < alpha <= 1.0:
+        raise ValueError(f"alpha must be in (0, 1], got {alpha}")
+    p, q = quantile_function_knots(forecast["q10"], forecast["q50"], forecast["q90"])
+    cut = 1.0 - alpha
+    q_cut = float(np.interp(cut, p, q))
+    keep = p > cut
+    pp = np.concatenate([[cut], p[keep]])
+    qq = np.concatenate([[q_cut], q[keep]])
+    return float(np.sum((pp[1:] - pp[:-1]) * (qq[1:] + qq[:-1]) / 2.0) / alpha)
+
+
+def make_cvar_aware(alpha: float, risk_weight: float):
+    """
+    Step 7: CVaR-based alternative to make_uncertainty_aware, testing
+    whether a different DECISION RULE can shift the risk-tolerance
+    frontier rather than just move along it.
+
+    Two differences from make_uncertainty_aware:
+      1. Risk measure: CVaR_alpha (expected intensity in the worst
+         alpha-fraction of outcomes, see `cvar`) instead of the single
+         q90 quantile.
+      2. Candidate selection: evaluates EVERY remaining feasible
+         candidate, not only the argmin-q50 one. For each:
+
+             risk_adjusted = (1 - risk_weight) * q50 + risk_weight * CVaR_alpha
+
+         and takes the candidate with the lowest risk_adjusted cost.
+         A candidate with a slightly worse median but a much tighter
+         forecast can therefore win -- uncertainty_aware never even
+         looks at it.
+
+    Decision: wait if that best risk_adjusted cost < actual(t), else run
+    now (same tie-breaking direction as make_uncertainty_aware).
+
+    IMPORTANT, given `cvar`'s docstring: at alpha=0.2 (the calibration
+    alpha) CVaR_0.2 = q90 under the piecewise-linear approximation, so
+    the per-candidate score is q50 + risk_weight * (q90 - q50) -- the
+    SAME bound uncertainty_aware applies, at the same risk_weight. The
+    only behavioral difference at alpha=0.2 is point 2 (min over all
+    candidates vs. the bound at argmin-q50 only). Since
+    min_c score(c) <= score(argmin-q50), this policy waits at least as
+    often as uncertainty_aware at the same risk_weight, never less.
+
+    risk_weight=0.0 reduces to min over candidates of q50, i.e. exactly
+    forecast_greedy (verified in tests/test_schedulers.py).
+    """
+    def scheduler(t, job, remaining_times, ctx) -> bool:
+        if not remaining_times:
+            return True
+        best = np.inf
+        for ft in remaining_times:
+            f = ctx.forecast(t, _horizon_hours(t, ft))
+            score = (1 - risk_weight) * f["q50"] + risk_weight * cvar(f, alpha)
+            best = min(best, score)
+        if best < ctx.actual_at(t):
+            return False  # wait
+        return True  # run now
+
+    scheduler.__name__ = f"cvar_aware_a{alpha}_risk_{risk_weight}"
+    scheduler.alpha = alpha
+    scheduler.risk_weight = risk_weight
+    return scheduler
 
 
 SCHEDULERS = {

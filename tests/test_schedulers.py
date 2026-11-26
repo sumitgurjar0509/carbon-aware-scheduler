@@ -20,7 +20,13 @@ import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from schedulers import forecast_greedy, make_uncertainty_aware, uncertainty_aware  # noqa: E402
+from schedulers import (  # noqa: E402
+    cvar,
+    forecast_greedy,
+    make_cvar_aware,
+    make_uncertainty_aware,
+    uncertainty_aware,
+)
 from simulator import SimContext, simulate_job  # noqa: E402
 
 
@@ -118,3 +124,58 @@ def test_risk_weight_monotonically_widens_threshold():
     assert thresholds == sorted(thresholds)
     assert thresholds[0] == pytest.approx(q50)
     assert thresholds[-1] == pytest.approx(q90)
+
+
+# ----------------------------------------------------------------------
+# Step 7: CVaR helper + make_cvar_aware
+# ----------------------------------------------------------------------
+def _brute_force_cvar(f, alpha, n=200_001):
+    """Monte-Carlo-free check: average Q(p) on a fine grid over [1-alpha, 1]."""
+    from schedulers import quantile_function_knots
+    p, q = quantile_function_knots(f["q10"], f["q50"], f["q90"])
+    grid = np.linspace(1 - alpha, 1, n)
+    return float(np.interp(grid, p, q).mean())
+
+
+@pytest.mark.parametrize("alpha", [0.05, 0.1, 0.2, 0.5, 0.7, 1.0])
+def test_cvar_matches_brute_force_integration(alpha):
+    f = {"q10": 80.0, "q50": 120.0, "q90": 200.0}
+    assert cvar(f, alpha) == pytest.approx(_brute_force_cvar(f, alpha), rel=1e-6)
+
+
+def test_cvar_at_calibration_alpha_equals_q90():
+    """Documented consequence of the piecewise-linear approximation."""
+    f = {"q10": 50.0, "q50": 90.0, "q90": 170.0}
+    assert cvar(f, 0.2) == pytest.approx(170.0)
+
+
+def test_cvar_alpha_1_is_mean_and_monotone_in_alpha():
+    f = {"q10": 80.0, "q50": 120.0, "q90": 200.0}
+    # mean of a piecewise-uniform distribution = integral of Q over [0, 1]
+    assert cvar(f, 1.0) == pytest.approx(_brute_force_cvar(f, 1.0), rel=1e-6)
+    values = [cvar(f, a) for a in [1.0, 0.7, 0.5, 0.2, 0.1, 0.05]]
+    assert values == sorted(values)  # smaller alpha -> deeper tail -> higher CVaR
+
+
+def test_cvar_handles_crossed_quantiles():
+    assert cvar({"q10": 130.0, "q50": 120.0, "q90": 200.0}, 0.2) == pytest.approx(200.0)
+
+
+def test_cvar_aware_risk_0_exactly_matches_forecast_greedy():
+    ctx, jobs = _synthetic_ctx_and_jobs(seed=12, n_jobs=60)
+    cvar_0 = make_cvar_aware(alpha=0.2, risk_weight=0.0)
+    for _, job in jobs.iterrows():
+        assert simulate_job(job, forecast_greedy, ctx)["started_time"] ==             simulate_job(job, cvar_0, ctx)["started_time"]
+
+
+@pytest.mark.parametrize("w", [0.2, 0.6, 1.0])
+def test_cvar_aware_never_runs_earlier_than_uncertainty_aware(w):
+    """
+    At alpha=0.2 both score candidates by q50 + w*(q90-q50); cvar_aware
+    takes the min over ALL candidates (<= the score at argmin-q50), so at
+    every step it waits whenever uncertainty_aware waits.
+    """
+    ctx, jobs = _synthetic_ctx_and_jobs(seed=13, n_jobs=60)
+    ua, ca = make_uncertainty_aware(w), make_cvar_aware(0.2, w)
+    for _, job in jobs.iterrows():
+        assert simulate_job(job, ca, ctx)["started_time"] >=             simulate_job(job, ua, ctx)["started_time"]
