@@ -1,0 +1,76 @@
+Stage 2 started; code 667080ab94513a8784867c8a96eeb70e7b684e3e; frozen params sha256 130f98418208
+Loaded clean_20250923_20260923.csv: 17521 rows (2025-09-23 03:30:00+00:00 -> 2026-09-23 03:30:00+00:00)
+Test hours 2026-07-12 09:00:00+00:00 -> 2026-09-23 03:00:00+00:00 (1747 h); jobs 2359; model i rho=0.9319634619803034; S=2000
+  random_fifo                      total   84.712 t    0.0 min  bf_dis -  ru 0/0
+  actual_lp_a1                     total   59.689 t    1.4 min  bf_dis 0  ru 0/0
+  base_lp_a1                       total   69.740 t    1.4 min  bf_dis 0  ru 0/0
+  base_lp_replan_a1                total   66.946 t    5.9 min  bf_dis 0  ru 0/0
+  base_lp_recal_a1                 total   71.027 t    0.8 min  bf_dis 0  ru 0/0
+  base_lp_replan_recal_a1          total   69.636 t    4.4 min  bf_dis 0  ru 0/0
+  mean_lp_a1                       total   72.336 t    1.1 min  bf_dis 0  ru 0/0
+  mean_lp_replan_a1                total   66.677 t    6.6 min  bf_dis 0  ru 0/0
+  cvar_lp_bestpos_a1               total   72.978 t    4.3 min  bf_dis 0  ru 200/0
+  cvar_lp_replan_bestpos_a1        total   67.949 t    9.0 min  bf_dis 0  ru 200/0
+  cvar_lp_replan_tail_a1           total   70.130 t    8.6 min  bf_dis 0  ru 200/0
+  actual_lp_a0.5                   total   62.907 t    0.8 min  bf_dis 0  ru 0/0
+  base_lp_a0.5                     total   72.423 t    0.8 min  bf_dis 0  ru 0/0
+  base_lp_replan_a0.5              total   69.928 t    7.4 min  bf_dis 0  ru 0/0
+  base_lp_recal_a0.5               total   73.439 t    0.8 min  bf_dis 0  ru 0/0
+  base_lp_replan_recal_a0.5        total   72.415 t    6.6 min  bf_dis 0  ru 0/0
+  mean_lp_a0.5                     total   74.999 t    1.1 min  bf_dis 0  ru 0/0
+  mean_lp_replan_a0.5              total   69.894 t    8.8 min  bf_dis 0  ru 0/0
+  cvar_lp_bestpos_a0.5             total   75.429 t    9.8 min  bf_dis 0  ru 200/0
+  cvar_lp_replan_bestpos_a0.5      total   70.885 t   17.2 min  bf_dis 0  ru 200/0
+  cvar_lp_replan_tail_a0.5         total   72.549 t   10.7 min  bf_dis 0  ru 200/0
+M2 reproduction: {'random_fifo == M2 random_fifo': True, 'base_lp_a1 == M2 lp_forecast_a1': True, 'base_lp_a0.5 == M2 lp_forecast_a0.5': True, 'actual_lp_a1 == M2 lp_actual_a1': True, 'actual_lp_a0.5 == M2 lp_actual_a0.5': True}
+
+ alpha            reference                                                       policy  total_tCO2  cut_vs_fifo_pct  gap_closed_pct  regret_rate_vs_base_pct  cvar10_intensity_g_per_kwh  mean_delay_h
+   1.0 H1_reference_base_lp                                                  random_fifo      84.712            0.000        -148.949                   58.415                     200.305         0.000
+   1.0 H1_reference_base_lp                                                 actual_lp_a1      59.689           29.539         100.000                   10.216                     145.627        10.629
+   1.0 H1_reference_base_lp                                                   base_lp_a1      69.740           17.674           0.000                    0.000                     180.747         7.645
+   1.0 H1_reference_base_lp                                            base_lp_replan_a1      66.946           20.972          27.799                   27.173                     160.683         6.591
+   1.0 H1_reference_base_lp                                             base_lp_recal_a1      71.027           16.154         -12.803                   18.101                     181.994         5.734
+   1.0 H1_reference_base_lp                                      base_lp_replan_recal_a1      69.636           17.797           1.042                   34.337                     164.244         4.795
+   1.0 H1_reference_base_lp                                                   mean_lp_a1      72.336           14.610         -25.820                   21.535                     189.524         6.911
+   1.0 H1_reference_base_lp                                            mean_lp_replan_a1      66.677           21.290          30.477                   32.471                     158.332         6.167
+   1.0 H1_reference_base_lp                                           cvar_lp_bestpos_a1      72.978           13.851         -32.214                   25.774                     190.468         6.484
+   1.0 H1_reference_base_lp                                    cvar_lp_replan_bestpos_a1      67.949           19.788          17.819                   34.633                     159.202         5.497
+   1.0 H1_reference_base_lp                                       cvar_lp_replan_tail_a1      70.130           17.213          -3.880                   38.745                     161.917         4.521
+   1.0 H1_reference_base_lp                   cvar_lp_a1 (= mean_lp_a1, selected beta 0)      72.336           14.610         -25.820                   21.535                     189.524         6.911
+   1.0 H1_reference_base_lp     cvar_lp_replan_a1 (= mean_lp_replan_a1, selected beta 0)      66.677           21.290          30.477                   32.471                     158.332         6.167
+   0.5 H1_reference_base_lp                                                  random_fifo      84.712            0.000        -129.133                   55.490                     200.305         0.000
+   0.5 H1_reference_base_lp                                               actual_lp_a0.5      62.907           25.740         100.000                    8.309                     171.747        11.822
+   0.5 H1_reference_base_lp                                                 base_lp_a0.5      72.423           14.507           0.000                    0.000                     187.827         9.889
+   0.5 H1_reference_base_lp                                          base_lp_replan_a0.5      69.928           17.452          26.219                   26.833                     177.407         8.941
+   0.5 H1_reference_base_lp                                           base_lp_recal_a0.5      73.439           13.307         -10.677                   14.667                     189.314         8.599
+   0.5 H1_reference_base_lp                                    base_lp_replan_recal_a0.5      72.415           14.516           0.084                   33.277                     180.072         7.771
+   0.5 H1_reference_base_lp                                                 mean_lp_a0.5      74.999           11.466         -27.068                   20.687                     194.316         9.492
+   0.5 H1_reference_base_lp                                          mean_lp_replan_a0.5      69.894           17.492          26.575                   30.649                     177.636         8.768
+   0.5 H1_reference_base_lp                                         cvar_lp_bestpos_a0.5      75.429           10.958         -31.589                   24.417                     194.775         9.217
+   0.5 H1_reference_base_lp                                  cvar_lp_replan_bestpos_a0.5      70.885           16.323          16.167                   32.302                     177.868         8.309
+   0.5 H1_reference_base_lp                                     cvar_lp_replan_tail_a0.5      72.549           14.358          -1.323                   35.481                     177.465         7.643
+   0.5 H1_reference_base_lp               cvar_lp_a0.5 (= mean_lp_a0.5, selected beta 0)      74.999           11.466         -27.068                   20.687                     194.316         9.492
+   0.5 H1_reference_base_lp cvar_lp_replan_a0.5 (= mean_lp_replan_a0.5, selected beta 0)      69.894           17.492          26.575                   30.649                     177.636         8.768
+
+Effects (descriptive): {
+ "alpha_1": {
+  "H1_cvar_lp_replan_minus_base_lp_tCO2": -3.063366000000002,
+  "H2_cvar_lp_replan_minus_base_lp_replan_tCO2": -0.26913125000000093,
+  "bias_correction_no_replan_tCO2": 1.2868957499999993,
+  "bias_correction_replan_tCO2": 2.6894849999999906,
+  "uncertainty_cvar_lp_bestpos_a1_minus_mean_lp_a1_tCO2": 0.6427657499999953,
+  "uncertainty_cvar_lp_replan_bestpos_a1_minus_mean_lp_replan_a1_tCO2": 1.2723352499999976,
+  "uncertainty_cvar_lp_replan_tail_a1_minus_mean_lp_replan_a1_tCO2": 3.4534097499999916
+ },
+ "alpha_0.5": {
+  "H1_cvar_lp_replan_minus_base_lp_tCO2": -2.5289837499999948,
+  "H2_cvar_lp_replan_minus_base_lp_replan_tCO2": -0.033897999999993544,
+  "bias_correction_no_replan_tCO2": 1.0160432499999956,
+  "bias_correction_replan_tCO2": 2.4871212500000013,
+  "uncertainty_cvar_lp_bestpos_a0.5_minus_mean_lp_a0.5_tCO2": 0.43028700000000697,
+  "uncertainty_cvar_lp_replan_bestpos_a0.5_minus_mean_lp_replan_a0.5_tCO2": 0.9904794999999922,
+  "uncertainty_cvar_lp_replan_tail_a0.5_minus_mean_lp_replan_a0.5_tCO2": 2.6548772499999984
+ }
+}
+
+Stage 2 finished in 107.6 min. Results in D:\carbon-aware-scheduler\results\tables\m3\test
