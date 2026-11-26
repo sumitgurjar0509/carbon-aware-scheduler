@@ -645,6 +645,30 @@ textbook-monotonic frontier of the three. The overall (pooled) frontier
 rests on the most jobs; treat the per-bucket frontiers as suggestive,
 not independently conclusive, given the sample sizes involved.
 
+## M2: base-paper LP reimplementation (GB only)
+
+```powershell
+$env:CAS_DATA_TAG = "20250923_20260923"
+python src/hourly_forecasting.py      # hourly LightGBM + CQR -> results/models/m2_hourly/
+python src/lp_scheduler.py --time 100 # optional: time 100 solves first
+python src/lp_scheduler.py            # full run -> results/tables/m2_base_lp/
+```
+
+This reimplements the LP scheduler of Zanotto et al. (GreenSys '26,
+`docs/base_paper.pdf`, CC BY 4.0). The specification is in
+`docs/m2_spec.md`, and every assumption is listed in `docs/assumptions.md`.
+
+- **What differs from the paper:** we have one grid (GB), no on-site
+  solar data, a 24-hour LightGBM forecaster, and only the summer 2026
+  test period. So our numbers show **time-shifting only** and are **not
+  comparable** to the paper's 27.7% / 32.09%.
+- **Where the numbers are:**
+  - `results/tables/m2_base_lp/published_vs_reproduced.csv` keeps the
+    published and reproduced values in separate columns;
+  - `summary.csv` has every policy;
+  - `run_info.json` records the seeds and settings.
+- **Package versions:** `results/environment_m2.txt`.
+
 ## Tests
 
 ```bash

@@ -1,6 +1,21 @@
 # M2 specification: reimplementing the base paper's LP scheduler
 
-Status: **draft for approval**. No code yet.
+Status: **approved 2026-11-26**, with the conditions recorded below
+(Eq. 1 quoted in §1.2, implemented objective in §1.3a, G19–G20,
+limitation L1). Phase B follows this spec.
+
+Decisions taken at approval:
+1. Hourly forecasts: train a separate hourly LightGBM + CQR set in
+   `results/models/m2_hourly/`; the M1 models are not touched (§3.3, option a).
+2. Clusters: 1 local + 8 cloud clusters, all on GB carbon intensity (§3.1).
+3. G1–G18 approved, with G1 made explicit in §1.2–1.3a.
+4. `docs/base_paper.pdf` is committed, with the attribution line below.
+
+> Attribution: `docs/base_paper.pdf` is Zanotto, M., Padovani, G., Iacca, G.,
+> Fiore, S. (2026). "Carbon Intensity Forecasting with On-Site Renewables
+> for Sustainable AI Workload Scheduling". GreenSys '26, ACM.
+> https://doi.org/10.1145/3802973.3804455. Licensed under CC BY 4.0
+> (https://creativecommons.org/licenses/by/4.0/). Included unmodified.
 
 Source: Zanotto, Padovani, Iacca, Fiore, *Carbon Intensity Forecasting with
 On-Site Renewables for Sustainable AI Workload Scheduling*, GreenSys '26,
@@ -39,7 +54,25 @@ CI_l(t)   = %P_grid(t)·CI_j(t) + (1 − %P_grid(t))·EF_gen                    
 - `EF_gen` is the generator's emission factor in gCO2eq/kWh.
 - `C_hw` is the power per node.
 
-As printed, Eq. 1 cannot be right: `min{…, 0}` is never positive, so the grid share would be ≤ 0. It must mean `max{…, 0}` (see G1).
+**Eq. 1 exactly as printed** (p. 15; symbols from the PDF text layer, the
+fraction bar written as `/`):
+
+```
+%𝑃𝑔𝑟𝑖𝑑 (𝑡) = 𝑚𝑖𝑛{(𝐶ℎ𝑤 · (𝑁 + 𝑁𝑙 (𝑡))) − 𝑃𝑔𝑒𝑛 (𝑡), 0} / (𝐶ℎ𝑤 · (𝑁 + 𝑁𝑙 (𝑡)))      (1)
+```
+
+As printed, Eq. 1 cannot be right: `min{…, 0}` is never positive, so the
+grid share would be ≤ 0. **Implemented** (G1):
+
+```
+%P_grid(t) = max{ C_hw·(N + N_l(t)) − P_gen(t), 0 } / ( C_hw·(N + N_l(t)) )     ∈ [0, 1]
+CI_l(t)    = %P_grid(t)·CI_GB(t) + (1 − %P_grid(t))·EF_gen
+```
+
+`%P_grid = 1` means all the power comes from the grid, and `0` means the
+generator covers all of it. In M2, `P_gen = 0` (no solar data, §3.2), so
+`%P_grid = 1` and `CI_l = CI_GB`. The function is still implemented and
+tested with toy solar values.
 
 ### 1.3 Decision variables and objective (§3.3, Eq. 3–5, p. 16)
 
@@ -53,6 +86,29 @@ As printed, Eq. 1 cannot be right: `min{…, 0}` is never positive, so the grid 
 | Objective | `t*, j* = argmin_{t,j} { α·Ē(t,j) − (1−α)·L̄(t,j) }` | Eq. 5, p. 16 |
 | Normalisation | `Ē`, `L̄` are Eq. 3 and Eq. 4 "normalized over their maximum value", so both are in [0, 1] | §3.3, p. 16 |
 | `α` | `α ∈ [0, 1]`; experiments use `α ∈ {1, 0.5, 0}` | Eq. 5, p. 16; §4.2, p. 17 |
+
+### 1.3a Objective exactly as implemented
+
+For one arriving job with `N` nodes, `D` hours, and decision hour `o`:
+
+- **Options**: the job can start at offset `t = 0, …, T − D` (absolute hour `o + t`) on cluster `j = 0` (local) or `j = 1…8` (cloud).
+- **Feasibility**: an option `(t, j)` is feasible when `N + used_j(o+τ) ≤ cap_j` for every hour `τ = t, …, t+D−1`, where `cap_0 = 10` and `cap_j = 20` otherwise.
+- **Planning cost**: `c_tj = Σ_{τ=t}^{t+D−1} CI_plan_j(o+τ)`. `CI_plan_j` is the forecast (or the actual value, for the ground-truth LP), with `CI_plan_0` adjusted by Eq. 1–2.
+- **Normalised terms** (over the feasible set `F`):
+  - `Ē_tj = c_tj / max_{(t',j')∈F} c_t'j'`
+  - `L̄_tj = 1` if `j = 0`, else `0` (this is `a_tj / N`)
+- **Model**:
+
+```
+minimise    Σ_{(t,j)∈F} [ α·Ē_tj − (1−α)·L̄_tj + ε·(j·T + t)/(9·T) ] · x_tj
+subject to  Σ_{(t,j)∈F} x_tj = 1,     x_tj ∈ {0, 1},     ε = 1e-6
+```
+
+Infeasible `(t, j)` are left out, which is the same as `x_tj = 0`.
+Constraint 2 (`t + D ≤ T`) holds because `t ≤ T − D`.
+
+- **Signs**: the model **minimises** emissions, because `+α·Ē` is a cost. It **favours the local cluster**, because `−(1−α)·L̄` is a reward. These are the paper's Eq. 5 signs unchanged; only Eq. 1 needed correcting.
+- **The `ε` term** is the tie-break from G9: lower cluster index first, then earlier start. It is at most `1e-6`, much smaller than any real difference between options.
 
 ### 1.4 Constraints (§3.3, p. 16)
 
@@ -119,6 +175,9 @@ the code is written.
 | G17 | `EF_gen` (solar emission factor) is not given | Not needed: we have no on-site generator (§3.2). Eq. 1–2 are implemented with `P_gen = 0` and tested on toy numbers | Keeps the code ready if solar data is added later |
 | G18 | Hourly CI from 30-min data | Hour `H` = mean of the `H:00` and `H:30` settlement periods (CLAUDE.md M2). The dataset starts at 03:30, so the first, incomplete hour is dropped | As CLAUDE.md asks |
 
+| G19 | Valid ranges for generated jobs (added at approval) | Both values are drawn from `Normal(6, 2)`, rounded, and **redrawn until valid**, so each follows a truncated normal. Duration `D ∈ [1, T] = [1, 24]` hours (D > 0, and the job must fit the horizon). Nodes `N ∈ [1, 20]` (≥ 1, and ≤ the largest cluster capacity, so every job can run somewhere). A job with `N > 10` can only use the cloud clusters | Every job has at least one valid placement; redraws happen for only ≈ 0.3% (D, N < 1) and ≈ 0.0003% (N > 20) of draws, so the shape is barely changed |
+| G20 | Seeds | Job generator seed **20260923**; random-FIFO seed **20260924**. Both are recorded in `results/tables/m2_base_lp/run_info.json` and in `jobs.csv`'s file name | Fixed before any run (rule 3) |
+
 None of these assumptions is tuned. `α` comes from the paper, `T` from
 our forecaster's limit, and both seeds are fixed in advance. So nothing
 touches the test period before the single final run (CLAUDE.md rule 1).
@@ -170,6 +229,16 @@ not be comparable** to 27.7% / 32.09%, and the write-up must say so plainly.
   - Keep the paper's rate of 1000 jobs per month, with arrivals uniform over `[test_start, test_end − T]` so every job's window lies in the test period. That window is ≈ 71.8 days, giving ≈ 2,359 jobs.
   - All policies run on the identical jobs, CI, capacities and horizon (rule 2). The job seed and FIFO seed are written into every results file (rule 3).
   - Summer-only results are not an annual figure, and the write-up will say so. M4 will extend this to more periods and seeds.
+
+### 3.4a Limitation L1: summer only
+
+The test period covers only about 73 days in July–September 2026. GB
+carbon intensity changes a lot through the year. In the README's EDA,
+monthly means range from about 93 gCO2/kWh (April 2026) to about 164
+(September 2025), and the daily swing differs by season. **M2 results therefore describe one
+summer, not a year**, and must not be read as annual savings.
+Multi-season evaluation (several months and several seeds) is planned
+for M4.
 
 ### 3.5 Reporting (rule 6)
 

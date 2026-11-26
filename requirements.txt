@@ -21,3 +21,6 @@ scikit-learn==1.4.2
 matplotlib>=3.7
 requests>=2.31
 pytest>=7.4
+# M2 LP solver (bundles the CBC solver). Pinned: PuLP 4.0 removes the
+# PULP_CBC_CMD / LpVariable API used in src/lp_scheduler.py.
+pulp==3.3.2
