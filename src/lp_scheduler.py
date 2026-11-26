@@ -132,15 +132,18 @@ def feasible_options(nodes: int, duration: int, plan_ci: np.ndarray, used: np.nd
 def objective_coefficients(options, alpha: float, horizon: int = HORIZON_T,
                            n_clusters: int = N_CLUSTERS):
     """
-    Spec §1.3a:  alpha*E_bar - (1-alpha)*L_bar + eps*(j*T + t)/(n_clusters*T)
+    Spec §1.3a:  alpha*E_bar - (1-alpha)*L_bar + eps*(t*J + j)/(J*T),  J = n_clusters
     E_bar = c_tj / max c over the feasible options; L_bar = 1 on the local cluster.
+    Tie-break (G9, corrected after the first test run): earliest start first,
+    then local (j = 0) before cloud, then lowest cloud index -- so a job never
+    waits while a cluster with room is idle.
     Returns [(t, j, coefficient)].
     """
     if not options:
         return []
     c_max = max(abs(c) for _, _, c in options) or 1.0
     return [(t, j, alpha * (c / c_max) - (1 - alpha) * (1.0 if j == LOCAL else 0.0)
-             + TIE_EPS * (j * horizon + t) / (n_clusters * horizon))
+             + TIE_EPS * (t * n_clusters + j) / (n_clusters * horizon))
             for t, j, c in options]
 
 

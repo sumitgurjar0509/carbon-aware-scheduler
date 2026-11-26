@@ -100,7 +100,7 @@ For one arriving job with `N` nodes, `D` hours, and decision hour `o`:
 - **Model**:
 
 ```
-minimise    Σ_{(t,j)∈F} [ α·Ē_tj − (1−α)·L̄_tj + ε·(j·T + t)/(9·T) ] · x_tj
+minimise    Σ_{(t,j)∈F} [ α·Ē_tj − (1−α)·L̄_tj + ε·(t·9 + j)/(9·T) ] · x_tj
 subject to  Σ_{(t,j)∈F} x_tj = 1,     x_tj ∈ {0, 1},     ε = 1e-6
 ```
 
@@ -108,7 +108,7 @@ Infeasible `(t, j)` are left out, which is the same as `x_tj = 0`.
 Constraint 2 (`t + D ≤ T`) holds because `t ≤ T − D`.
 
 - **Signs**: the model **minimises** emissions, because `+α·Ē` is a cost. It **favours the local cluster**, because `−(1−α)·L̄` is a reward. These are the paper's Eq. 5 signs unchanged; only Eq. 1 needed correcting.
-- **The `ε` term** is the tie-break from G9: lower cluster index first, then earlier start. It is at most `1e-6`, much smaller than any real difference between options.
+- **The `ε` term** is the tie-break from G9 (corrected after the first test run, see below): earliest start first, then local before cloud, then lowest cloud index. It is at most `1e-6`, much smaller than any real difference between options.
 
 ### 1.4 Constraints (§3.3, p. 16)
 
@@ -164,7 +164,7 @@ the code is written.
 | G6 | What `t = 0` is, and whether the current hour can be used | Arrival time is rounded **up** to the next whole hour `o`. Forecasts are made at `o` with data up to `o`. Candidate starts are `o, …, o+T−D`, covered by horizons 1…24 (one-hour shift; detail fixed in Phase B) | Never uses information from after the decision time |
 | G7 | Normalisation "over their maximum value": the maximum over what? | Per job: `Ē = c_tj / max c` over that job's feasible `(t, j)`, and `L̄ = a_tj / N`. If no local option is feasible, `L̄ = 0` | Gives [0, 1] per job, as the paper requires |
 | G8 | Eq. 3's objective leaves out `N · C_hw`; `Em` includes it | Use `c_tj` in the objective as written. This changes nothing, because `N · C_hw` is the same for every option of one job (with no solar, see §3.2) | Faithful to Eq. 3 |
-| G9 | Ties: several `(t, j)` can have exactly the same cost (common for us: all clusters share GB data, see §3.1) | Deterministic tie-break: lowest cluster index (local first), then earliest start. Implemented as tiny penalty terms (≤ 1e-6 of the objective range), and tested against brute-force enumeration | Results must be reproducible; CBC's own choice among ties is not guaranteed |
+| G9 | Ties: several `(t, j)` can have exactly the same cost (common for us: all clusters share GB data, see §3.1) | **Corrected after the first test run.** Deterministic tie-break: **earliest start first, then local before cloud, then lowest cloud index**. Implemented as tiny penalty terms (≤ 1e-6 of the objective range), and tested against brute-force enumeration. *v1 (first run) used lowest cluster index first, then earliest start* | Results must be reproducible; CBC's own choice among ties is not guaranteed. A job must never wait while a cluster with room is idle |
 | G10 | How long a forecast is reused ("a configurable time validity", p. 15) | A fresh forecast at each arrival hour; jobs arriving in the same hour share it | Smallest possible validity; no extra parameter |
 | G11 | Random FIFO details: does it include the local cluster? When does a job start? | Each job, in arrival order, picks uniformly at random among **all** clusters (local included) that have room for `[o, o+D)`, and starts at `o`. If none has room, it starts at the earliest hour where one does. Fixed seed | "FIFO" = start on arrival; "respecting resource constraints" = only clusters with room |
 | G12 | Formula behind 27.7% / 32.09% | `1 − Σ Em(LP) / Σ Em(random FIFO)` over all jobs, using the **actual** CI for both | The usual definition; matches our `pct_carbon_saved` |
@@ -177,6 +177,25 @@ the code is written.
 
 | G19 | Valid ranges for generated jobs (added at approval) | Both values are drawn from `Normal(6, 2)`, rounded, and **redrawn until valid**, so each follows a truncated normal. Duration `D ∈ [1, T] = [1, 24]` hours (D > 0, and the job must fit the horizon). Nodes `N ∈ [1, 20]` (≥ 1, and ≤ the largest cluster capacity, so every job can run somewhere). A job with `N > 10` can only use the cloud clusters | Every job has at least one valid placement; redraws happen for only ≈ 0.3% (D, N < 1) and ≈ 0.0003% (N > 20) of draws, so the shape is barely changed |
 | G20 | Seeds | Job generator seed **20260923**; random-FIFO seed **20260924**. Both are recorded in `results/tables/m2_base_lp/run_info.json` and in `jobs.csv`'s file name | Fixed before any run (rule 3) |
+
+### G9 corrected after the first test run (2026-11-26)
+
+- **What was found**: the first full run (v1) used the cluster-first
+  tie-break. At `α = 0`, every cloud option scores the same, so the
+  tie-break decided. Jobs waited for cloud clusters 1–2 instead of
+  starting at once on idle clusters 3–8: mean start delay 13.4 h, with
+  clusters 4–8 almost unused (3 jobs on cluster 4, none on 5–8).
+- **Why this is a correctness fix, not tuning**: a tie-break should never
+  make a job wait while capacity is idle. The new order (earliest start,
+  then local, then lowest cloud index) was fixed from that requirement,
+  not chosen to improve any test-period number. No other setting changed.
+- **Disclosure**: the problem was seen in test-period results. The v1
+  results are kept, committed, in
+  `results/tables/m2_base_lp_v1_cluster_first_tiebreak/`. The corrected
+  run (v2) is in `results/tables/m2_base_lp/`, and the write-up must
+  mention both.
+- **Test**: `test_alpha0_does_not_wait_for_a_busy_cloud_cluster` fails
+  under the v1 rule and passes under v2.
 
 None of these assumptions is tuned. `α` comes from the paper, `T` from
 our forecaster's limit, and both seeds are fixed in advance. So nothing

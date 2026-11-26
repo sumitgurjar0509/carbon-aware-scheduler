@@ -1,8 +1,8 @@
 metric,published,reproduced_gb_only,not_applicable_yet
 "Emission reduction vs random FIFO, LP with forecast, alpha=1 (%)","27.7 (Chronos 2, 8 regions)","17.67 (LightGBM q50, GB only)",
-"Emission reduction vs random FIFO, LP with ground truth, alpha=1 (%)",32.09 (8 regions),29.55 (GB only),
+"Emission reduction vs random FIFO, LP with ground truth, alpha=1 (%)",32.09 (8 regions),29.54 (GB only),
 Forecast LP reduction / ground-truth LP reduction (%),86.3 (derived from 27.7 and 32.09),59.8,
-"Emission increase, alpha=0.5 vs alpha=1 (%)",9.97 (CI source not stated),forecast LP 3.85; ground-truth LP 5.41,
+"Emission increase, alpha=0.5 vs alpha=1 (%)",9.97 (CI source not stated),forecast LP 3.85; ground-truth LP 5.39,
 Per-region emission breakdown (Fig. 3b),shown as a figure only,,only one grid (GB); all clusters share the same CI
 "Solar-adjusted local CI (Eq. 1-2, Fig. 2)",used (Electricity Maps solar),,"no on-site solar data; P_gen = 0, so local CI = GB CI"
 Forecaster MSE (Table 1),"176.58 (Chronos 2, 96 h, 8 regions, 2023)",,"different data, regions and horizon; our hourly MSE is in hourly_forecast_by_horizon.csv"

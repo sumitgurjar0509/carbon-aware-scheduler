@@ -34,7 +34,7 @@
   ],
   "forecaster": "hourly LightGBM q50, results/models/m2_hourly",
   "pulp_version": "3.3.2",
-  "lp_wall_time_s": 358.1,
+  "lp_wall_time_s": 348.0,
   "brute_force_disagreements": {
     "lp_forecast_a1": 0,
     "lp_forecast_a0.5": 0,

@@ -6,7 +6,30 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+from compare_m2_tiebreak import compare_versions  # noqa: E402
 from compare_tables import compare_dirs, compare_frames, main  # noqa: E402
+import pytest  # noqa: E402
+
+
+def _summary(cut, delay, local):
+    return pd.DataFrame({"policy": ["random_fifo", "lp_actual_a1"], "alpha": [np.nan, 1.0],
+                         "pct_reduction_vs_random_fifo": cut, "mean_start_delay_h": delay,
+                         "local_job_share": local})
+
+
+def test_compare_m2_versions_side_by_side():
+    out = compare_versions(_summary([0, 30], [0, 10], [0.1, 0.2]),
+                           _summary([0, 29], [0, 4], [0.1, 0.3]))
+    row = out.set_index("policy").loc["lp_actual_a1"]
+    assert row["cut_vs_fifo_pct_change"] == pytest.approx(-1)
+    assert row["mean_delay_h_v1"] == 10 and row["mean_delay_h_v2"] == 4
+    assert row["local_share_change"] == pytest.approx(0.1)
+
+
+def test_compare_m2_versions_requires_same_policies():
+    with pytest.raises(ValueError):
+        compare_versions(_summary([0, 1], [0, 1], [0, 1]),
+                         _summary([0, 1], [0, 1], [0, 1]).iloc[::-1])
 
 
 def _table(**changes):

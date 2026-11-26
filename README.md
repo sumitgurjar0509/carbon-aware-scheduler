@@ -667,6 +667,11 @@ This reimplements the LP scheduler of Zanotto et al. (GreenSys '26,
     published and reproduced values in separate columns;
   - `summary.csv` has every policy;
   - `run_info.json` records the seeds and settings.
+- **Tie-break correction:** the first run used a tie-break that made
+  α = 0 jobs wait while cloud clusters were idle. It is kept in
+  `results/tables/m2_base_lp_v1_cluster_first_tiebreak/` (spec: "G9
+  corrected after the first test run"). `v1_vs_v2_tiebreak.csv` compares
+  the two runs; make it with `python scripts/compare_m2_tiebreak.py`.
 - **Package versions:** `results/environment_m2.txt`.
 
 ## Tests

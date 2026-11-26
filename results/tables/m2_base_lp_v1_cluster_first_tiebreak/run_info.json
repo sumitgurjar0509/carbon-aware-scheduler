@@ -1,0 +1,46 @@
+{
+  "data_tag": "20250923_20260923",
+  "job_seed": 20260923,
+  "fifo_seed": 20260924,
+  "horizon_T_h": 24,
+  "alphas": [
+    1.0,
+    0.5,
+    0.0
+  ],
+  "capacities": [
+    10,
+    20,
+    20,
+    20,
+    20,
+    20,
+    20,
+    20,
+    20
+  ],
+  "c_hw_kw": 8.5,
+  "jobs_per_month": 1000,
+  "job_mu_sigma": [
+    6.0,
+    2.0
+  ],
+  "tie_eps": 1e-06,
+  "p_gen_kw": 0.0,
+  "n_jobs": 2359,
+  "test_hours": [
+    "2026-07-12 09:00:00+00:00",
+    "2026-09-23 03:00:00+00:00"
+  ],
+  "forecaster": "hourly LightGBM q50, results/models/m2_hourly",
+  "pulp_version": "3.3.2",
+  "lp_wall_time_s": 358.1,
+  "brute_force_disagreements": {
+    "lp_forecast_a1": 0,
+    "lp_forecast_a0.5": 0,
+    "lp_forecast_a0": 0,
+    "lp_actual_a1": 0,
+    "lp_actual_a0.5": 0,
+    "lp_actual_a0": 0
+  }
+}

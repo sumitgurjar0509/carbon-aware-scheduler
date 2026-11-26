@@ -94,10 +94,32 @@ def test_lp_matches_brute_force(seed):
     assert lp.solve_lp(coefs) == lp.solve_brute_force(coefs)
 
 
-def test_ties_broken_by_lowest_cluster_then_earliest_start():
+def test_ties_broken_by_earliest_start_then_local_then_lowest_cloud_index():
     used = np.zeros((lp.N_CLUSTERS, T), dtype=int)
     assert _choose(2, 2, [100] * T, used, alpha=1.0) == (0, lp.LOCAL)
     assert _choose(2, 2, [100] * T, used, alpha=1.0, solver=lp.solve_brute_force) == (0, lp.LOCAL)
+    used[lp.LOCAL, :] = lp.N_MAX_LOCAL
+    assert _choose(2, 2, [100] * T, used, alpha=1.0) == (0, 1)
+
+
+def test_alpha0_local_full_cloud_idle_starts_now_on_cloud():
+    """G9 correction: with the local cluster full and the cloud idle, start at t=0 in the cloud."""
+    used = np.zeros((lp.N_CLUSTERS, T), dtype=int)
+    used[lp.LOCAL, :] = lp.N_MAX_LOCAL
+    t, j = _choose(nodes=4, duration=2, gb=[100] * T, used=used, alpha=0.0)
+    assert t == 0 and j != lp.LOCAL
+
+
+def test_alpha0_does_not_wait_for_a_busy_cloud_cluster():
+    """
+    The v1 bug: cloud cluster 1 is busy now but free later, clusters 2-8 are idle.
+    The old cluster-first tie-break waited for cluster 1 (t=2); the job must start now.
+    """
+    used = np.zeros((lp.N_CLUSTERS, T), dtype=int)
+    used[lp.LOCAL, :] = lp.N_MAX_LOCAL
+    used[1, :2] = lp.Q_MAX_CSP
+    for solver in (lp.solve_lp, lp.solve_brute_force):
+        assert _choose(4, 2, [100] * T, used, alpha=0.0, solver=solver) == (0, 2)
 
 
 # ----------------------------------------------------------------------

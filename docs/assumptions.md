@@ -13,7 +13,7 @@ what the code does. The full reasoning and page references are in
 | G6 | Decision hour `o` = arrival rounded up to the hour; forecasts at `o` use data up to hour `o−1`; slots `o … o+23` | `generate_jobs`, `hourly_forecasting` |
 | G7 | `Ē = c / max c` over the job's feasible options; `L̄ = 1` on the local cluster, else 0 | `objective_coefficients` |
 | G8 | Objective uses `c_tj` (summed CI) as in Eq. 3; `N · C_hw` appears only in the reported emissions | `objective_coefficients`, `actual_emissions_g` |
-| G9 | Ties broken by lowest cluster index, then earliest start (penalty ≤ 1e-6) | `TIE_EPS` |
+| G9 | **G9 corrected after the first test run.** Ties broken by earliest start, then local before cloud, then lowest cloud index (penalty ≤ 1e-6). Reason: v1 (cluster index first) made α = 0 jobs wait for busy clusters while others were idle (13.4 h mean delay). v1 results kept in `results/tables/m2_base_lp_v1_cluster_first_tiebreak/` | `objective_coefficients`, `TIE_EPS` |
 | G10 | A fresh forecast for every decision hour | `forecast_tables` |
 | G11 | Random FIFO: start at the decision hour on a random cluster with room (local included); if none, the next hour | `run_random_fifo` |
 | G12/G13 | Reduction = `1 − total(policy) / total(random FIFO)`; every policy scored with ACTUAL hourly CI | `summarise` |
