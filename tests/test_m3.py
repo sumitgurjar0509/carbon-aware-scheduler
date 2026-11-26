@@ -294,3 +294,71 @@ def test_c1_rows_keep_targets_before_the_boundary():
     kept = tu.c1_rows(df_h, ts[0], tu.C1_END)
     assert (kept["target_timestamp"] + lp.ONE_HOUR <= tu.C1_END).all()
     assert len(kept) == 2  # origins 20:00, 21:00 -> targets end 23:00, 00:00
+
+
+# ----------------------------------------------------------------------
+# Scenario-model revision (spec §1a) and tail-risk beta
+# ----------------------------------------------------------------------
+def test_general_knots_reduce_to_v1_for_three_levels():
+    vals = np.array([[100.0, 120.0, 180.0]])
+    p, q = sc.knots_from_levels(vals, sc.LEVELS_V1)
+    np.testing.assert_allclose(p, sc.P_KNOTS)
+    np.testing.assert_allclose(q[0], sc.quantile_knots(100.0, 120.0, 180.0))
+
+
+def test_seven_level_knots_tails_and_sampling():
+    levels = sc.LEVELS_V2
+    vals = np.tile([60.0, 75.0, 85.0, 100.0, 130.0, 150.0, 180.0], (24, 1))
+    p, q = sc.knots_from_levels(vals, levels)
+    assert q[0, 0] == pytest.approx(60 - (75 - 60) / 0.03 * 0.02)   # slope of the first segment
+    assert q[0, -1] == pytest.approx(180 + (180 - 150) / 0.03 * 0.02)
+    paths, _ = sc.sample_paths_levels(vals, levels, 50_000, ORIGIN, rho=0.5)
+    assert (paths[:, 3] <= 75.0).mean() == pytest.approx(0.05, abs=0.006)
+    assert (paths[:, 3] <= 150.0).mean() == pytest.approx(0.95, abs=0.006)
+
+
+def test_sampling_with_a_correlation_matrix():
+    corr = np.full((24, 24), 0.3) + 0.7 * np.eye(24)
+    vals = np.tile([80.0, 100.0, 130.0], (24, 1))
+    paths, _ = sc.sample_paths_levels(vals, sc.LEVELS_V1, 40_000, ORIGIN, corr=corr)
+    knots = sc.quantile_knots(vals[:, 0], vals[:, 1], vals[:, 2])
+    z = np.array([sc.pit_z(r, knots)[0] for r in paths[:4000]])
+    assert np.corrcoef(z[:, 2], z[:, 17])[0, 1] == pytest.approx(0.3, abs=0.05)
+
+
+def test_planner_uses_requested_levels():
+    ci, jobs, quant = _world()
+    wide = dict(quant, q05=quant["q10"] - 30, q95=quant["q90"] + 30)
+    p3 = m3.Planner("scenario", ci, quantiles=wide, n_scenarios=2000)
+    p5 = m3.Planner("scenario", ci, quantiles=wide, n_scenarios=2000,
+                    levels=(0.05, 0.1, 0.5, 0.9, 0.95))
+    assert p5.paths(5).std() > p3.paths(5).std()
+
+
+def test_pit_outside_support_and_histogram():
+    import m3_scenario_model as sm
+    vals = np.tile([80.0, 100.0, 130.0], (2, 24, 1))
+    y = np.full((2, 24), 100.0)
+    y[0, 0] = 10.0        # far below Q(0) = 75
+    u, outside = sm.pit_values(vals, sc.LEVELS_V1, y)
+    assert outside.sum() == 1 and u[0, 0] == 0.0
+    assert u[1, 5] == pytest.approx(0.5, abs=1e-6)
+
+
+def test_shrunk_correlation_is_a_valid_correlation_matrix():
+    import m3_scenario_model as sm
+    rng = np.random.default_rng(1)
+    z = rng.standard_normal((300, 24)) @ np.linalg.cholesky(sc.ar1_corr(0.8)).T
+    corr, shrink = sm.shrunk_correlation(z)
+    np.testing.assert_allclose(np.diag(corr), 1.0)
+    assert 0 <= shrink <= 1 and np.all(np.linalg.eigvalsh(corr) > 0)
+    assert corr[0, 1] == pytest.approx(0.8, abs=0.1)
+
+
+def test_select_beta_tail_rule():
+    import m3_tuning as tu
+    totals = {0.0: 100.0, 0.1: 100.5, 0.25: 101.5, 0.5: 100.9}
+    cvar = {0.0: 200.0, 0.1: 199.0, 0.25: 150.0, 0.5: 190.0}
+    # base_replan = 100 -> limit 101: 0.25 excluded; lowest CVaR among 0.1, 0.5 -> 0.5
+    assert tu.select_beta_tail(totals, cvar, 100.0) == 0.5
+    assert tu.select_beta_tail({0.0: 90.0, 0.1: 120.0}, {0.0: 1.0, 0.1: 1.0}, 100.0) is None

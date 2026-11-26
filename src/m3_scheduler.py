@@ -22,7 +22,7 @@ from numpy.lib.stride_tricks import sliding_window_view
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import lp_scheduler as lp  # noqa: E402
-from scenarios import SCENARIO_SEED, sample_paths  # noqa: E402
+from scenarios import LEVELS_V1, SCENARIO_SEED, sample_paths_levels  # noqa: E402
 
 A_CVAR = 0.2      # fixed (spec §5): CVaR_0.2 = mean of the worst 20% of scenarios (upper tail)
 J = lp.N_CLUSTERS
@@ -128,7 +128,8 @@ def solve_ru_mip(scores: dict, t_idx, j_idx, alpha: float, beta: float, a: float
         for q in range(s):
             terms = [(x[i], -float(e[i, q])) for i in range(k)] + [(u[q], 1.0), (eta, 1.0)]
             prob += pulp.LpAffineExpression(terms) >= 0
-        status = prob.solve(pulp.PULP_CBC_CMD(msg=False))
+        # gapRel = 0: the reference must be exact (spec §5, run hygiene).
+        status = prob.solve(pulp.PULP_CBC_CMD(msg=False, gapRel=0))
     if pulp.LpStatus[status] != "Optimal":
         raise RuntimeError(f"CBC status {pulp.LpStatus[status]}")
     i = int(np.argmax([v.value() for v in x]))
@@ -142,14 +143,18 @@ class Planner:
     """
     kind = "point":    one path, e.g. the q50 forecast table (origins x 24)
     kind = "actual":   one path, the true hourly CI
-    kind = "scenario": S paths from the calibrated quantiles (scenarios.py)
+    kind = "scenario": S paths from the calibrated quantiles (scenarios.py);
+                       `quantiles` maps "q02".."q98" to tables, `levels` lists
+                       the levels used (default q10/q50/q90), and the copula is
+                       AR(1) with `rho` or the matrix `corr`.
     paths(H) returns (S, 24) for hours H .. H+23 (truncated at the data end).
     """
 
     def __init__(self, kind, hourly_ci: pd.Series, table=None, quantiles=None, rho=0.0,
-                 n_scenarios=1, seed=SCENARIO_SEED):
+                 n_scenarios=1, seed=SCENARIO_SEED, levels=LEVELS_V1, corr=None):
         self.kind, self.table, self.quantiles = kind, table, quantiles
         self.rho, self.n_scenarios, self.seed = rho, n_scenarios, seed
+        self.levels, self.corr = tuple(levels), corr
         self.hours = pd.DatetimeIndex(hourly_ci.index)
         self.ci = hourly_ci.to_numpy(float)
         self._cache_h, self._cache = None, None
@@ -168,10 +173,11 @@ class Planner:
         elif self.kind == "point":
             out = self.table.loc[origin, list(range(T))].to_numpy(float)[None, :]
         elif self.kind == "scenario":
-            q = [self.quantiles[k].loc[origin, list(range(T))].to_numpy(float)
-                 for k in ("q10", "q50", "q90")]
-            out, floored = sample_paths(*q, rho=self.rho, n_scenarios=self.n_scenarios,
-                                        origin=origin, seed=self.seed)
+            values = np.stack([self.quantiles[f"q{int(round(q * 100)):02d}"]
+                               .loc[origin, list(range(T))].to_numpy(float)
+                               for q in self.levels], axis=-1)
+            out, floored = sample_paths_levels(values, self.levels, self.n_scenarios, origin,
+                                               rho=self.rho, corr=self.corr, seed=self.seed)
             self.n_floored += floored
         else:
             raise ValueError(self.kind)
