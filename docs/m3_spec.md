@@ -163,6 +163,24 @@ unused for choosing the fix.
      - **uncertainty effect** = `cvar_*` vs `mean_*` (β > 0 vs β = 0) on the same scenarios.
 5. **Run hygiene.** Spec and code are committed before running, and the scripts refuse to run with uncommitted `src/` or `tests/` changes.
 
+**Result of round 2 (judged on C2; code commit `f3ae6f4`):**
+
+| Model | A1 (≤ 1%) | A2 (75–85%) | A3 deciles (5–15%) | Result |
+|---|---|---|---|---|
+| v1 | 22.7% | 62.2% | 5.9%–22.0% | fail |
+| (i) | 7.2% | 70.3% | 6.1%–22.1% | fail |
+| (iii) | 8.3% | 67.4% | 5.7%–18.6% | **fail** |
+
+- For reference only, (iii) on C1: A1 2.2%, A2 82.5%, A3 6.2%–13.1%.
+- **Decision (rule 3, pre-declared):** (iii) failed on C2, so **candidate (i) is adopted**, with ρ = 0.9320 estimated on C1. No further candidates.
+- **Limitation, recorded:** on C2, (i) fails **all three** criteria.
+  - A1: 7.2% of actuals fall outside the scenario support.
+  - A2: 6-hour-sum coverage is 70.3%.
+  - A3: the top decile holds 22.1% of actuals.
+- The intervals are too narrow on C2, mainly at the top (q98 covers only 91.1%). Recalibrating on C1 fixed the q50 bias on C2 (48.8% of actuals below it, vs 41.0% raw) but did not carry over to the outer levels. This points to a **distribution shift between C1 (May) and C2 (June–July)**.
+- The scenarios used by every CVaR variant therefore **understate risk**, and the write-up must say so.
+- **The attribution controls still run.** `base_lp*_recal` use the (iii) recalibrated q50, as declared in rule 4.
+
 ---
 
 ## 2. CVaR model for one job

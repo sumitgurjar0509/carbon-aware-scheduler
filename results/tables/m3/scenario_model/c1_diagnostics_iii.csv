@@ -1,0 +1,2 @@
+model,levels,copula,A1_outside_support,A1_pass,A2_cov_6h_pooled,A2_pass,cov_6h_h0_5,cov_6h_h6_11,cov_6h_h12_17,cov_6h_h18_23,A3_min_bin,A3_max_bin,A3_pass,n_origins,n_values,all_pass,period,method,rho_c1
+iii,q02 q05 q10 q50 q90 q95 q98,AR(1) rho=0.9291,0.02195813771517997,False,0.8248239436619719,True,0.8368544600938967,0.8262910798122066,0.8157276995305164,0.8204225352112676,0.06225547730829421,0.13077073552425664,True,852,20448,False,C1 (reference only),recal,0.9291282537353994
