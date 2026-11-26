@@ -52,6 +52,7 @@ CQR_C1_PATH = CQR_C1_DIR / "cqr_corrections.csv"
 TAILS_DIR = PROJECT_ROOT / "results" / "models" / "m3_hourly_tails"
 TAIL_LEVELS = (0.02, 0.05, 0.95, 0.98)
 TAIL_PAIRS = {(0.05, 0.95): 0.10, (0.02, 0.98): 0.04}   # CQR alpha per interval pair
+RECAL_DIR = PROJECT_ROOT / "results" / "models" / "m3_recal_c1"
 OUT_DIR = PROJECT_ROOT / "results" / "tables" / "m3" / "scenario_model"
 STAGE1_V1 = PROJECT_ROOT / "results" / "tables" / "m3" / "stage1_v1" / "frozen_params.json"
 
@@ -125,12 +126,64 @@ def train_tail_models(df30, tag):
 # ----------------------------------------------------------------------
 # Quantile tables for any set of levels
 # ----------------------------------------------------------------------
-def quantile_tables(hourly, origins: pd.DatetimeIndex, tag: str, levels=sc.LEVELS_V2) -> dict:
+def _models_dir_for(level):
+    return TAILS_DIR if level in TAIL_LEVELS else HOURLY_MODELS_DIR
+
+
+def raw_predictions(hourly, origins: pd.DatetimeIndex, levels) -> dict:
+    """Raw LightGBM predictions (no correction): level key -> DataFrame (origins x 24)."""
+    feat = hourly_features(hourly).set_index("timestamp")
+    X = feat.loc[origins, get_feature_columns(feat.reset_index())]
+    return {level_key(q): pd.DataFrame(
+        {h: _booster(_models_dir_for(q), h, q).predict(X) for h in HOURLY_HORIZONS}, index=origins)
+        for q in levels}
+
+
+def fit_recal_shifts(hourly, calib_start, levels=sc.LEVELS_V2, c1_end=C1_END) -> pd.DataFrame:
     """
-    level key -> DataFrame (origins x 24). q10/q50/q90 from m2_hourly with the
-    C1 corrections; tail levels from m3_hourly_tails with their C1 corrections.
-    All levels are then sorted per (origin, horizon) (monotone rearrangement).
+    Candidate (iii): for each level q and horizon h, shift = empirical q-quantile
+    (numpy default, linear) of the C1 residuals y - raw prediction. C1 rows only.
     """
+    feat = hourly_features(hourly)
+    cols = get_feature_columns(feat)
+    rows = []
+    for h in HOURLY_HORIZONS:
+        c1 = c1_rows(horizon_dataset(feat, hourly, h), calib_start, c1_end)
+        for q in levels:
+            pred = _booster(_models_dir_for(q), h, q).predict(c1[cols])
+            resid = c1["target"].to_numpy(float) - pred
+            rows.append({"level": level_key(q), "horizon_h": h, "shift": float(np.quantile(resid, q)),
+                         "n_c1": len(c1), "c1_last_target": str(c1["target_timestamp"].max())})
+    return pd.DataFrame(rows)
+
+
+def apply_shifts(raw: dict, shifts: pd.DataFrame, levels) -> dict:
+    """raw + per-level shifts, then sorted per (origin, horizon)."""
+    out = {}
+    for q in levels:
+        s = shifts[shifts.level == level_key(q)].set_index("horizon_h")["shift"]
+        out[level_key(q)] = raw[level_key(q)] + s.reindex(HOURLY_HORIZONS).to_numpy()[None, :]
+    keys = [level_key(q) for q in sorted(levels)]
+    index = out[keys[0]].index
+    stacked = np.sort(np.stack([out[k].to_numpy(float) for k in keys], axis=-1), axis=-1)
+    return {k: pd.DataFrame(stacked[..., i], index=index, columns=HOURLY_HORIZONS)
+            for i, k in enumerate(keys)}
+
+
+def quantile_tables(hourly, origins: pd.DatetimeIndex, tag: str, levels=sc.LEVELS_V2,
+                    method: str = "cqr") -> dict:
+    """
+    level key -> DataFrame (origins x 24), sorted per (origin, horizon).
+    method "cqr" (v1 and candidate (i)): q10/q50/q90 from m2_hourly with the
+      C1 CQR correction; tail levels from m3_hourly_tails with their C1 CQR.
+    method "recal" (candidate (iii)): raw predictions + per-level C1 shifts.
+    """
+    if method == "recal":
+        check_model_label(RECAL_DIR, tag)
+        shifts = pd.read_csv(RECAL_DIR / "recal_shifts.csv")
+        return apply_shifts(raw_predictions(hourly, origins, levels), shifts, levels)
+    if method != "cqr":
+        raise ValueError(method)
     base = forecast_tables(hourly, origins, tag=tag, corrections_path=CQR_C1_PATH)
     out = {level_key(q): base[level_key(q)] for q in (0.1, 0.5, 0.9) if q in levels}
     extra = [q for q in levels if q in TAIL_LEVELS]
@@ -164,10 +217,106 @@ def stack_levels(tables: dict, levels) -> np.ndarray:
 # ----------------------------------------------------------------------
 # Diagnostics A1-A3 (spec §1a)
 # ----------------------------------------------------------------------
-def c1_origins(hourly, calib_start, c1_end=C1_END) -> pd.DatetimeIndex:
+def period_origins(hourly, start, end) -> pd.DatetimeIndex:
+    """Origins >= start whose 24 target hours all end by `end`."""
     ci = hourly.set_index("timestamp")["carbon_intensity"]
-    o = ci.index[(ci.index >= calib_start) & (ci.index + 24 * lp.ONE_HOUR <= c1_end)]
+    o = ci.index[(ci.index >= start) & (ci.index + 24 * lp.ONE_HOUR <= end)]
     return o.intersection(pd.DatetimeIndex(hourly_features(hourly)["timestamp"]))
+
+
+def c1_origins(hourly, calib_start, c1_end=C1_END) -> pd.DatetimeIndex:
+    return period_origins(hourly, calib_start, c1_end)
+
+
+def choose_round2(row_iii: dict) -> str:
+    """Spec §1a rule 3: (iii) if it passes A1-A3 on C2, otherwise the pre-declared fallback (i)."""
+    return "iii" if row_iii["all_pass"] else "i"
+
+
+def git_clean() -> tuple:
+    head = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True,
+                          cwd=PROJECT_ROOT).stdout.strip()
+    dirty = subprocess.run(["git", "status", "--porcelain", "--", "src", "tests"],
+                           capture_output=True, text=True, cwd=PROJECT_ROOT).stdout.strip()
+    return head, not dirty
+
+
+def actuals(hourly, origins):
+    ci = hourly.set_index("timestamp")["carbon_intensity"]
+    return np.stack([ci.loc[o: o + 23 * lp.ONE_HOUR].to_numpy(float) for o in origins])
+
+
+def round2(tag, df30):
+    """Candidate (iii): fit on C1, judge on C2 (spec §1a). No scheduling results."""
+    commit, clean = git_clean()
+    if not clean:
+        raise SystemExit("Uncommitted changes in src/ or tests/: commit before running.")
+    hourly = to_hourly(df30)
+    calib_start, test_start, _ = m1_boundaries(df30)
+    RECAL_DIR.mkdir(parents=True, exist_ok=True)
+    (RECAL_DIR / "data_tag.json").unlink(missing_ok=True)
+    shifts = fit_recal_shifts(hourly, calib_start)
+    assert (pd.to_datetime(shifts["c1_last_target"]) + lp.ONE_HOUR <= C1_END).all()
+    shifts.to_csv(RECAL_DIR / "recal_shifts.csv", index=False)
+    write_model_label(RECAL_DIR, tag, stage="calibration")
+    shifts.to_csv(OUT_DIR / "recal_shifts_c1.csv", index=False)
+
+    o1, o2 = c1_origins(hourly, calib_start), period_origins(hourly, C1_END, test_start)
+    y1, y2 = actuals(hourly, o1), actuals(hourly, o2)
+    assert o2.max() + 24 * lp.ONE_HOUR <= test_start
+
+    def c1_rho(levels, method):  # rho is always estimated on C1
+        v = stack_levels(quantile_tables(hourly, o1, tag, levels, method), levels)
+        return sc.estimate_rho(z_from_u(pit_values(v, levels, y1)[0]))
+
+    v1_rho = json.loads(STAGE1_V1.read_text(encoding="utf-8"))["rho"]
+    specs = [("v1", sc.LEVELS_V1, "cqr", v1_rho),
+             ("i", sc.LEVELS_V2, "cqr", c1_rho(sc.LEVELS_V2, "cqr")),
+             ("iii", sc.LEVELS_V2, "recal", c1_rho(sc.LEVELS_V2, "recal"))]
+
+    rows, hists, level_rows = [], {}, []
+    for name, levels, method, rho in specs:
+        tables = quantile_tables(hourly, o2, tag, levels, method)
+        v = stack_levels(tables, levels)
+        r, hists[name], _ = diagnose(name, v, levels, y2, o2, rho=rho)
+        r.update({"period": "C2 (judged)", "method": method, "rho_c1": rho})
+        rows.append(r)
+        level_rows += [{"model": name, "level": level_key(q),
+                        "c2_share_below": float(np.mean(y2 < tables[level_key(q)].to_numpy(float)))}
+                       for q in levels]
+    v = stack_levels(quantile_tables(hourly, o1, tag, sc.LEVELS_V2, "recal"), sc.LEVELS_V2)
+    ref, hist_c1, _ = diagnose("iii", v, sc.LEVELS_V2, y1, o1, rho=specs[2][3])
+    ref.update({"period": "C1 (reference only)", "method": "recal", "rho_c1": specs[2][3]})
+
+    chosen_name = choose_round2(rows[2])
+    _, levels, method, rho = {s[0]: s for s in specs}[chosen_name]
+    chosen = {"model": chosen_name, "levels": list(levels), "copula": "ar1", "rho": rho,
+              "method": method,
+              "limitation": None if chosen_name == "iii" else
+              "fallback (i): fails A1 and/or A3; recorded as a limitation (spec §1a rule 3)"}
+
+    diag = pd.DataFrame(rows)
+    diag.to_csv(OUT_DIR / "c2_diagnostics.csv", index=False)
+    pd.DataFrame([ref]).to_csv(OUT_DIR / "c1_diagnostics_iii.csv", index=False)
+    hist_df = pd.DataFrame(hists, index=[f"{b / 10:.1f}-{(b + 1) / 10:.1f}" for b in range(10)])
+    hist_df["iii_on_C1_reference"] = hist_c1
+    hist_df.rename_axis("u_bin").to_csv(OUT_DIR / "pit_histograms_c2.csv")
+    level_cov = pd.DataFrame(level_rows)
+    level_cov.to_csv(OUT_DIR / "c2_level_coverage.csv", index=False)
+    (OUT_DIR / "scenario_model.json").write_text(json.dumps({
+        "chosen": chosen, "round": 2,
+        "decided_by": "candidate (iii) judged on C2 by A1-A3; fallback (i) if it fails (spec §1a)",
+        "code_commit_at_run": commit, "code_clean_at_run": clean, "data_tag": tag,
+        "c2_origins": [str(o2.min()), str(o2.max())], "n_c2_origins": len(o2),
+        "c2_diagnostics": rows, "c1_reference_iii": ref}, indent=2, default=str), encoding="utf-8")
+    print(diag.round(4).T.to_string())
+    print("\n(iii) on C1 (reference only):", {k: round(ref[k], 4) for k in
+          ("A1_outside_support", "A2_cov_6h_pooled", "A3_min_bin", "A3_max_bin")})
+    print("\nPIT histograms:")
+    print(hist_df.round(4).to_string())
+    print("\nShare of C2 actuals below each level:")
+    print(level_cov.pivot(index="level", columns="model", values="c2_share_below").round(3).to_string())
+    print(f"\nChosen scenario model: {chosen}")
 
 
 def pit_values(values, levels, y):
@@ -300,4 +449,7 @@ def main(train=False, run_diagnose=False):
 
 
 if __name__ == "__main__":
-    main(train="--train-tails" in sys.argv, run_diagnose="--diagnose" in sys.argv)
+    if "--round2" in sys.argv:
+        round2(get_data_tag(), load_clean_data())
+    else:
+        main(train="--train-tails" in sys.argv, run_diagnose="--diagnose" in sys.argv)

@@ -362,3 +362,43 @@ def test_select_beta_tail_rule():
     # base_replan = 100 -> limit 101: 0.25 excluded; lowest CVaR among 0.1, 0.5 -> 0.5
     assert tu.select_beta_tail(totals, cvar, 100.0) == 0.5
     assert tu.select_beta_tail({0.0: 90.0, 0.1: 120.0}, {0.0: 1.0, 0.1: 1.0}, 100.0) is None
+
+
+# ----------------------------------------------------------------------
+# Candidate (iii): per-level recalibration (spec §1a)
+# ----------------------------------------------------------------------
+def test_recal_shift_matches_level_share_on_fit_data():
+    rng = np.random.default_rng(0)
+    y = rng.normal(100, 20, 5000)
+    pred = np.full(5000, 90.0)                  # biased low
+    for q in (0.1, 0.5, 0.9):
+        shift = np.quantile(y - pred, q)
+        assert np.mean(y < pred + shift) == pytest.approx(q, abs=0.002)
+
+
+def test_apply_shifts_sorts_levels():
+    import m3_scenario_model as sm
+    idx = pd.date_range("2026-06-06", periods=3, freq="h", tz="UTC")
+    raw = {sm.level_key(q): pd.DataFrame(v, index=idx, columns=range(24))
+           for q, v in [(0.1, 90.0), (0.5, 100.0), (0.9, 110.0)]}
+    shifts = pd.DataFrame([{"level": k, "horizon_h": h, "shift": s}
+                           for k, s in [("q10", 30.0), ("q50", 0.0), ("q90", 0.0)]
+                           for h in range(24)])
+    out = sm.apply_shifts(raw, shifts, (0.1, 0.5, 0.9))
+    assert out["q10"].iloc[0, 0] == 100.0 and out["q50"].iloc[0, 0] == 110.0  # sorted
+    assert out["q90"].iloc[0, 0] == 120.0
+
+
+def test_round2_choice_and_fallback():
+    import m3_scenario_model as sm
+    assert sm.choose_round2({"all_pass": True}) == "iii"
+    assert sm.choose_round2({"all_pass": False}) == "i"
+
+
+def test_period_origins_keep_targets_before_end():
+    import m3_scenario_model as sm
+    hours = pd.date_range("2026-06-01", periods=24 * 5, freq="h", tz="UTC")
+    hourly = pd.DataFrame({"timestamp": hours, "carbon_intensity": np.arange(len(hours), dtype=float)})
+    end = pd.Timestamp("2026-06-05 08:30", tz="UTC")
+    o = sm.period_origins(hourly, pd.Timestamp("2026-06-03", tz="UTC"), end)
+    assert (o + 24 * lp.ONE_HOUR <= end).all() and len(o) > 0

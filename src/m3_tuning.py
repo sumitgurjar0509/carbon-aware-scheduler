@@ -36,7 +36,7 @@ import m3_scheduler as m3  # noqa: E402
 import scenarios as sc  # noqa: E402
 from data_config import get_data_tag  # noqa: E402
 from forecasting import load_clean_data  # noqa: E402
-from hourly_forecasting import m1_boundaries, to_hourly  # noqa: E402
+from hourly_forecasting import forecast_tables, m1_boundaries, to_hourly  # noqa: E402
 from m3_scenario_model import C1_END, CQR_C1_PATH, c1_rows, quantile_tables  # noqa: E402,F401
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -103,20 +103,30 @@ def load_scenario_model() -> dict:
     return chosen
 
 
-def c2_world(df30, tag, levels):
+def c2_world(df30, tag, levels, method="cqr"):
+    """
+    Returns the C2 world plus three point tables:
+      raw_q50   M2's exact q50 (base_lp, base_lp_replan: H1/H2 unchanged)
+      recal_q50 the candidate-(iii) recalibrated q50 (base_lp*_recal controls)
+    and `quant`, the scenario model's level tables (method of the chosen model).
+    """
     hourly = to_hourly(df30)
     calib_start, test_start, _ = m1_boundaries(df30)
     ci = hourly.set_index("timestamp")["carbon_intensity"]
     ci_c2 = ci[(ci.index >= C1_END) & (ci.index + lp.ONE_HOUR <= test_start)]
     assert ci_c2.index.max() + lp.ONE_HOUR <= test_start, "C2 would touch the test period"
     jobs = lp.generate_jobs(ci_c2.index.min(), ci_c2.index.max(), seed=TUNE_SEED)
-    quant = quantile_tables(hourly, pd.DatetimeIndex(ci_c2.index), tag, levels)
-    return hourly, ci_c2, jobs, quant, calib_start, test_start
+    origins = pd.DatetimeIndex(ci_c2.index)
+    quant = quantile_tables(hourly, origins, tag, levels, method)
+    raw_q50 = forecast_tables(hourly, origins, tag=tag)["q50"]
+    recal_q50 = quantile_tables(hourly, origins, tag, sc.LEVELS_V2, "recal")["q50"]
+    return hourly, ci_c2, jobs, quant, raw_q50, recal_q50, calib_start, test_start
 
 
-def run_variant(name, jobs, ci, quant, model, S, beta, replan, ru_check=0, alt_sizes=()):
+def run_variant(name, jobs, ci, quant, model, S, beta, replan, ru_check=0, alt_sizes=(),
+                table=None):
     kind = "point" if name.startswith("base") else "scenario"
-    planner = m3.Planner(kind, ci, table=quant["q50"], quantiles=quant,
+    planner = m3.Planner(kind, ci, table=table, quantiles=quant,
                          rho=model.get("rho", 0.0), corr=model.get("corr"),
                          levels=model["levels"], n_scenarios=S)
     t0 = time.perf_counter()
@@ -149,7 +159,8 @@ def main(timing_only=False):
     df30 = load_clean_data()
     model = load_scenario_model()
     C2_DIR.mkdir(parents=True, exist_ok=True)
-    hourly, ci_c2, jobs, quant, calib_start, test_start = c2_world(df30, tag, model["levels"])
+    hourly, ci_c2, jobs, quant, raw_q50, recal_q50, calib_start, test_start = c2_world(
+        df30, tag, model["levels"], model.get("method", "cqr"))
     print(f"Scenario model: {model['model']} ({model['copula']}); "
           f"C2 hours {ci_c2.index.min()} -> {ci_c2.index.max()}; jobs {len(jobs)}")
 
@@ -157,7 +168,7 @@ def main(timing_only=False):
         rows = []
         for name, S, ru in [("base_lp", 1, 0), ("cvar_S1000", 1000, 20), ("cvar_S2000", 2000, 10)]:
             _, d = run_variant(name, jobs.head(100), ci_c2, quant, model, S, S_CHECK_BETA, False,
-                               ru_check=ru)
+                               ru_check=ru, table=raw_q50)
             rows.append({"config": name, "S": S, "solves": d["solves"],
                          "per_option_solve_s": d["solve_time_s"] / d["solves"],
                          "wall_per_solve_s": d["wall_s"] / d["solves"],
@@ -183,11 +194,13 @@ def main(timing_only=False):
     runs, diags = {}, {}
     runs["random_fifo"] = lp.run_random_fifo(jobs, ci_c2)
     runs["actual_lp"], _ = lp.run_lp(jobs, ci_c2, ALPHA_TUNE, "actual")
-    m2_check, _ = lp.run_lp(jobs, ci_c2, ALPHA_TUNE, "forecast", quant["q50"])
+    m2_check, _ = lp.run_lp(jobs, ci_c2, ALPHA_TUNE, "forecast", raw_q50)
     for replan in (False, True):
         sfx = "_replan" if replan else ""
         runs[f"base_lp{sfx}"], diags[f"base_lp{sfx}"] = run_variant(
-            f"base_lp{sfx}", jobs, ci_c2, quant, model, 1, 0.0, replan)
+            f"base_lp{sfx}", jobs, ci_c2, quant, model, 1, 0.0, replan, table=raw_q50)
+        runs[f"base_lp{sfx}_recal"], diags[f"base_lp{sfx}_recal"] = run_variant(
+            f"base_lp{sfx}_recal", jobs, ci_c2, quant, model, 1, 0.0, replan, table=recal_q50)
         for beta in BETA_GRID:
             name = f"cvar_b{beta:g}{sfx}"
             runs[name], diags[name] = run_variant(name, jobs, ci_c2, quant, model, S, beta, replan,
@@ -198,8 +211,8 @@ def main(timing_only=False):
     print(f"base_lp (M3 engine) identical to M2 lp_scheduler on C2: {m2_identical}")
 
     summary = m3.summarise(runs, "random_fifo", "base_lp", "actual_lp")
-    summary["beta"] = [float(p.split("_b")[1].split("_")[0]) if p.startswith("cvar_b") else np.nan
-                       for p in summary.policy]
+    summary["beta"] = [float(p.split("cvar_b")[1].split("_")[0]) if p.startswith("cvar_b")
+                       else np.nan for p in summary.policy]
     summary["replan"] = [p.endswith("_replan") for p in summary.policy]
     for col in ("solves", "bf_disagree", "ru_checked", "ru_disagree_option", "ru_disagree_value",
                 "n_floored", "wall_s"):
@@ -220,6 +233,16 @@ def main(timing_only=False):
         {b: s_.loc[f"cvar_b{b:g}_replan", "cvar10_intensity_g_per_kwh"] for b in BETA_GRID},
         s_.loc["base_lp_replan", "total_tCO2"])
 
+    def eff(a, b):  # total of a minus total of b, in tCO2 and % of b
+        ta, tb = s_.loc[a, "total_tCO2"], s_.loc[b, "total_tCO2"]
+        return {"minus": f"{a} - {b}", "tCO2": ta - tb, "pct": 100 * (ta / tb - 1)}
+    effects = {
+        "bias_correction": {"no_replan": eff("base_lp_recal", "base_lp"),
+                            "replan": eff("base_lp_replan_recal", "base_lp_replan")},
+        "uncertainty_cvar_vs_mean": {
+            f"beta_{b:g}{sfx}": eff(f"cvar_b{b:g}{sfx}", f"cvar_b0{sfx}")
+            for sfx in ("", "_replan") for b in BETA_GRID if b > 0},
+    }
     model_out = {k: v for k, v in model.items() if k != "corr"}
     frozen = {
         "version": "stage1_v2 (scenario model revised after Stage 1 v1, before any test run)",
@@ -247,6 +270,7 @@ def main(timing_only=False):
                     "C2_hours": [str(ci_c2.index.min()), str(ci_c2.index.max())],
                     "test_start_not_used": str(test_start)},
         "s_agreement": {str(k): v for k, v in agreement.items()},
+        "c2_effects": effects,
         "m3_engine_reproduces_m2_on_c2": m2_identical,
         "c2_n_jobs": len(jobs),
         "c2_table": summary.round(6).replace({np.nan: None}).to_dict(orient="records"),
