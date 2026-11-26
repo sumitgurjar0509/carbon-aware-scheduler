@@ -80,6 +80,52 @@ scenarios**. This is fixed and recorded.
 - `ρ` is a single number shared by all origins.
 - With `a ≤ 0.1`, `CVaR_a` of a single hour lies entirely in the assumed upper tail (`p > 0.9`). For job costs summed over `D` hours with `ρ < 1`, this is softened but not removed.
 
+### 1a. Scenario model revised after Stage 1 v1, before any test run
+
+**Evidence that triggered the revision** (Stage 1 v1, kept in
+`results/tables/m3/stage1_v1/`):
+
+- **On C1**, 2,328 of 20,448 actual hourly values (**11.4%**) lay outside the scenario support `[Q(0), Q(1)]`. A calibrated distribution should have none there.
+- **On C2**, the scenario 10–90% range of 6-hour sums (hours 0–5 after the origin, ρ = 0.8185) contained the actual sum only **63%** of the time, against a target of 80%.
+
+**The fix is judged by C1 calibration diagnostics only.** No scheduling
+result, on C2 or anywhere else, is looked at while choosing it. The fix
+is made **once**: the first candidate that passes all three criteria
+below is adopted. If no candidate passes, the work stops and is reported
+for a decision.
+
+**Acceptance criteria, declared before any candidate is tried.** All
+three are checked on C1 origins whose 24 target hours all end by
+2026-06-06 00:00:
+
+| # | Criterion | Pass if |
+|---|---|---|
+| A1 | Share of actual hourly values outside the scenario support `[Q(0), Q(1)]`, pooled over all origins and horizons | **≤ 1%** |
+| A2 | Empirical coverage of the scenario 10%–90% range of **6-hour sums**, pooled over the four non-overlapping windows (hours 0–5, 6–11, 12–17, 18–23) of every origin, with S = 1000 scenarios per origin | **between 75% and 85%** |
+| A3 | PIT histogram: shares of `u = F(y)` in 10 equal bins over [0, 1] | **every bin between 5% and 15%** (the operational meaning of "roughly uniform"); the full histogram is reported |
+
+The hours 0–5 window is also reported on its own, for comparison with
+the v1 C2 figure.
+
+**Caveat.** The CQR corrections are fitted on C1, so A1–A3 are partly
+in-sample. This is the check you asked for. C2 and the test period stay
+unused for choosing the fix.
+
+**Candidates, tried in this order; stop at the first that passes A1–A3.**
+
+1. **(i) More quantile levels.**
+   - Train LightGBM models for `q02, q05, q95, q98` on the **training split only**, with the same features, horizons (h = 0…23), boundary rule and settings as `hourly_forecasting.py`. They are saved to `results/models/m3_hourly_tails/`.
+   - CQR on **C1**, one symmetric correction per interval pair: `(q05, q95)` with α = 0.10 and `(q02, q98)` with α = 0.04. `(q10, q90)` keeps its α = 0.20 correction from C1. `q50` is unchanged.
+   - The 7 values are then sorted (monotone rearrangement).
+   - Inverse CDF: piecewise-linear through `p = 0.02, 0.05, 0.10, 0.50, 0.90, 0.95, 0.98`. The tails run to `p = 0` and `p = 1`, continuing the slope of the neighbouring segment (the same rule as v1).
+   - The copula stays AR(1), with ρ **re-estimated on C1** from the new PIT values.
+2. **(ii) Empirical copula.** Only if (i) fails A2 (A1 and A3 depend only on the marginals): keep the 7-level marginals, but replace AR(1) with the empirical 24×24 correlation matrix of `z` on C1, shrunk towards the identity with the Ledoit–Wolf estimator (`sklearn.covariance.LedoitWolf`) and rescaled to a correlation matrix.
+
+**Outputs.**
+
+- C1 diagnostics for v1 and every candidate tried: `results/tables/m3/scenario_model/c1_diagnostics.csv`, `pit_histograms.csv`.
+- The chosen model: `scenario_model.json` (and `corr_c1.csv` if (ii) is used).
+
 ---
 
 ## 2. CVaR model for one job
@@ -287,6 +333,17 @@ then β (on C2). `a` is fixed.
    - Ties within 0.1% of the best go to the **smallest β** (simplest model).
    - The whole curve is reported, not just the winner.
    - If the winner is `β = 0`, that is reported as the result ("the CVaR term did not help on C2"), and the test run still includes `cvar_lp` with the best `β > 0` from the grid, **labelled as such**.
+5. **Secondary tail-risk β (declared 2026-11-26, before any test run and before Stage 1 v2).**
+   - For the **re-planning** setting, `β_tail` = the `β > 0` in the grid with the **lowest CVaR₀.₁ of per-job emission intensity** on C2. Only grid values whose total C2 emissions are **at most 1% above** `base_lp_replan`'s total qualify.
+   - Ties in CVaR₀.₁ go to the smallest β.
+   - If no `β > 0` qualifies, `β_tail` is recorded as `null`, and no tail-risk variant is run.
+   - Both the primary β (rule 4) and `β_tail` are frozen.
+   - In the test run, `β_tail` gives one extra, labelled variant: `cvar_lp_replan_tail`.
+
+**Run hygiene.**
+
+- **RU checks:** every RU MIP check is solved with CBC `gapRel = 0`, so the reference is exact.
+- **Commit before running:** all code is committed **before** every run, so `code_commit_at_run` in each output matches the code that produced it.
 
 The chosen ρ, S and β (one for each re-plan setting), the C2 table that
 justified them, and all seeds are written to
