@@ -126,6 +126,43 @@ unused for choosing the fix.
 - C1 diagnostics for v1 and every candidate tried: `results/tables/m3/scenario_model/c1_diagnostics.csv`, `pit_histograms.csv`.
 - The chosen model: `scenario_model.json` (and `corr_c1.csv` if (ii) is used).
 
+**Result of the first round (C1, commit `9d857ea`):**
+
+| Model | A1 | A2 | A3 (min–max decile) | Result |
+|---|---|---|---|---|
+| v1 | 11.4% | 75.7% | 3.7%–15.4% | fail |
+| (i) | 2.05% | 82.6% | 3.6%–15.4% | fail |
+
+- (ii) was not tried: it is allowed only when (i) fails A2 alone.
+- **Cause:** q50 is biased low on C1. Only 39.7% of actuals fall below q50, and the median of (actual − q50) is +6.7 gCO2/kWh. CQR is symmetric and leaves q50 unchanged.
+- Round-1 files: `c1_diagnostics.csv`, `pit_histograms.csv`, `c1_level_coverage.csv`, `scenario_model_round1.json`.
+
+#### Candidate (iii): added after candidate (i) failed; declared before (iii) was tried (2026-11-26)
+
+1. **Per-level recalibration, fitted on C1 only.**
+   - For each level `q ∈ {0.02, 0.05, 0.10, 0.50, 0.90, 0.95, 0.98}` (q50 included) and each horizon `h`, take the **raw** LightGBM prediction `p̂_{q,h}`:
+     - `q10/q50/q90` from `results/models/m2_hourly/`;
+     - the tail levels from `results/models/m3_hourly_tails/`.
+   - Add a shift `δ_{q,h}` = the empirical `q`-quantile (numpy default, linear interpolation) of the C1 residuals `y − p̂_{q,h}`. This uses C1 rows only, by the strict boundary rule. Then on C1 the share of actuals below `p̂ + δ` is `q`, up to rounding.
+   - CQR is **not** applied on top: the shifts replace it.
+   - The 7 shifted values are then sorted (monotone rearrangement).
+   - Tails, inverse CDF and copula are as in (i). ρ is re-estimated **on C1** from the (iii) PIT values. The shifts are saved to `results/models/m3_recal_c1/recal_shifts.csv`.
+2. **Judged on C2.** C2 is held out from the fit, and this is still before any test run.
+   - The thresholds are unchanged (A1 ≤ 1%, A2 75–85%, A3 every decile 5–15%).
+   - They are computed on C2 origins whose 24 target hours all end by the test start (2026-07-12 08:30), with S = 1000.
+   - v1 and (i) are also reported on C2 for comparison, and (iii) on C1 for reference only.
+   - No scheduling results are computed or read while judging.
+3. **Pre-declared fallback.**
+   - If (iii) fails any of A1–A3 on C2, candidate (i) is adopted, and its A1/A3 failures are recorded as a limitation.
+   - **No further candidates** will be tried.
+4. **Attribution controls.**
+   - `base_lp_recal` and `base_lp_replan_recal` are the paper's LP with the **recalibrated q50** (from (iii)) as the point forecast.
+   - `base_lp` and `base_lp_replan` stay on the **raw** q50, so H1 and H2 are unchanged.
+   - Two effects are reported separately (§6):
+     - **bias-correction effect** = `base_lp*_recal` vs `base_lp*`;
+     - **uncertainty effect** = `cvar_*` vs `mean_*` (β > 0 vs β = 0) on the same scenarios.
+5. **Run hygiene.** Spec and code are committed before running, and the scripts refuse to run with uncommitted `src/` or `tests/` changes.
+
 ---
 
 ## 2. CVaR model for one job
@@ -273,6 +310,9 @@ capacity, so it is not part of the bound.
 | `cvar_lp` | scenarios, chosen β > 0 | no | effect of the CVaR term alone |
 | `cvar_lp_replan` | scenarios, chosen β > 0, fresh each hour | yes | both together |
 | `mean_lp_replan` (control) | scenario mean, fresh each hour | yes | control for the above |
+| `base_lp_recal` | recalibrated `q50` (§1a (iii)) | no | attribution: bias-correction effect |
+| `base_lp_replan_recal` | recalibrated `q50`, fresh each hour | yes | attribution: bias-correction effect |
+| `cvar_lp_replan_tail` | scenarios, `β_tail` (§5 rule 5), fresh each hour | yes | secondary tail-risk variant (only if `β_tail` is not null) |
 | `actual_lp` | actual CI | no | bound (M2's `lp_actual`) |
 | `random_fifo` | — | — | baseline (M2's, same seed) |
 
@@ -367,6 +407,8 @@ every variant at α = 1 (and α = 0.5).
 | Regret rate (%) | Share of jobs whose realised emissions are higher than under the comparison policy: `base_lp`, or for H2 `base_lp_replan`. Paired by `job_id`, tolerance 1e-9 g. Also the mean regret in kgCO2 |
 | CVaR₀.₁ of per-job emissions | Mean of the worst 10% of jobs. Reported in two ways: (i) per-job emission intensity, `E / (N·C_hw·D)` in gCO2/kWh (the main one, so that big jobs don't dominate); (ii) raw per-job kgCO2 |
 | Mean start delay (h) | as in M2 |
+| Bias-correction effect | `Σ E(base_lp_recal) − Σ E(base_lp)`, and the same with re-planning (tCO2 and % of `base_lp`) |
+| Uncertainty effect | `Σ E(cvar, β) − Σ E(mean, β = 0)` on identical scenarios, without and with re-planning |
 | Also | Share of jobs on the local cluster; number of re-plans per job; solve times; RU-vs-per-option disagreements; scenario values floored at 0 |
 
 **Caution.** Per-job pairing is not a clean experiment. Jobs share
